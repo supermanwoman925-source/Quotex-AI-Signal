@@ -47,15 +47,59 @@
         </section>
 
 
+        <!-- SIGNAL DURATION -->
+
         <section class="timeframe-section">
 
             <div class="section-title">
-                TIMEFRAME
+                SIGNAL DURATION
             </div>
 
-            <button class="timeframe active">
-                1M
-            </button>
+            <div class="timeframe-buttons">
+
+                <button
+                    class="timeframe active"
+                    data-duration="5"
+                >
+                    5s
+                </button>
+
+                <button
+                    class="timeframe"
+                    data-duration="10"
+                >
+                    10s
+                </button>
+
+                <button
+                    class="timeframe"
+                    data-duration="15"
+                >
+                    15s
+                </button>
+
+                <button
+                    class="timeframe"
+                    data-duration="20"
+                >
+                    20s
+                </button>
+
+                <button
+                    class="timeframe"
+                    data-duration="45"
+                >
+                    45s
+                </button>
+
+                <button
+                    class="timeframe"
+                    data-duration="60"
+                >
+                    60s
+                </button>
+
+            </div>
 
         </section>
 
@@ -97,17 +141,24 @@
             <div class="confidence">
 
                 <div class="confidence-header">
-                    <span>Confidence</span>
+
+                    <span>
+                        Confidence
+                    </span>
+
                     <span id="confidence-value">
                         —
                     </span>
+
                 </div>
 
                 <div class="confidence-bar">
+
                     <div
                         id="confidence-fill"
                         class="confidence-fill"
                     ></div>
+
                 </div>
 
             </div>
@@ -139,14 +190,23 @@
         <section class="history-card">
 
             <div class="card-header">
-                <span>SIGNAL HISTORY</span>
-                <span id="history-count">0</span>
+
+                <span>
+                    SIGNAL HISTORY
+                </span>
+
+                <span id="history-count">
+                    0
+                </span>
+
             </div>
 
             <div id="history-list">
+
                 <p class="empty-history">
                     No signals recorded yet.
                 </p>
+
             </div>
 
         </section>
