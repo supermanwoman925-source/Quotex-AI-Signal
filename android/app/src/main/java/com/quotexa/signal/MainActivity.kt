@@ -1,141 +1,168 @@
-package com.quotexa.signal
+package com.quotex.signal
 
 import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.view.Gravity
+import android.view.ViewGroup
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.core.content.ContextCompat
+import androidx.appcompat.app.AppCompatActivity
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
 
-    private val screenCaptureLauncher =
-        registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
+    private lateinit var screenCaptureLauncher:
+        ActivityResultLauncher<Intent>
 
-            if (
-                result.resultCode == Activity.RESULT_OK &&
-                result.data != null
-            ) {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-                val serviceIntent =
-                    Intent(
-                        this,
-                        ScreenCaptureService::class.java
-                    ).apply {
+        mediaProjectionManager =
+            getSystemService(MEDIA_PROJECTION_SERVICE)
+                    as MediaProjectionManager
 
-                        putExtra(
+        screenCaptureLauncher =
+            registerForActivityResult(
+                ActivityResultContracts.StartActivityForResult()
+            ) { result ->
+
+                if (result.resultCode == Activity.RESULT_OK) {
+
+                    val dataIntent = result.data
+
+                    if (dataIntent != null) {
+
+                        val serviceIntent = Intent(
+                            this,
+                            ScreenCaptureService::class.java
+                        )
+
+                        serviceIntent.putExtra(
                             ScreenCaptureService.EXTRA_RESULT_CODE,
                             result.resultCode
                         )
 
-                        putExtra(
+                        serviceIntent.putExtra(
                             ScreenCaptureService.EXTRA_DATA,
-                            result.data
+                            dataIntent
                         )
+
+                        startForegroundService(serviceIntent)
+
+                    } else {
+                        statusText.text =
+                            "Screen capture data not received"
                     }
 
-                ContextCompat.startForegroundService(
-                    this,
-                    serviceIntent
-                )
-
-                statusMessage =
-                    "Screen capture is running"
-
-            } else {
-
-                statusMessage =
-                    "Screen capture permission denied"
+                } else {
+                    statusText.text =
+                        "Screen capture permission cancelled"
+                }
             }
-        }
 
-    companion object {
-
-        var statusMessage by mutableStateOf(
-            "Ready to scan chart"
-        )
+        createScreen()
     }
 
-    override fun onCreate(
-        savedInstanceState: Bundle?
-    ) {
+    private lateinit var statusText: TextView
 
-        super.onCreate(savedInstanceState)
+    private fun createScreen() {
 
-        mediaProjectionManager =
-            getSystemService(
-                Context.MEDIA_PROJECTION_SERVICE
-            ) as MediaProjectionManager
+        val root = LinearLayout(this)
 
-        setContent {
+        root.orientation = LinearLayout.VERTICAL
 
-            MaterialTheme {
+        root.gravity = Gravity.CENTER
 
-                SignalHome(
-                    status = statusMessage,
+        root.setPadding(
+            40,
+            40,
+            40,
+            40
+        )
 
-                    onScanClick = {
+        val title = TextView(this)
 
-                        val intent =
-                            mediaProjectionManager
-                                .createScreenCaptureIntent()
+        title.text = "Quotex AI Signal"
 
-                        screenCaptureLauncher
-                            .launch(intent)
-                    }
-                )
-            }
+        title.textSize = 28f
+
+        title.gravity = Gravity.CENTER
+
+        root.addView(
+            title,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        statusText = TextView(this)
+
+        statusText.text =
+            "Ready to capture screen"
+
+        statusText.textSize = 18f
+
+        statusText.gravity = Gravity.CENTER
+
+        val statusParams =
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+
+        statusParams.topMargin = 40
+
+        root.addView(
+            statusText,
+            statusParams
+        )
+
+        val startButton = Button(this)
+
+        startButton.text =
+            "START SCREEN CAPTURE"
+
+        val buttonParams =
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+
+        buttonParams.topMargin = 40
+
+        root.addView(
+            startButton,
+            buttonParams
+        )
+
+        startButton.setOnClickListener {
+
+            statusText.text =
+                "Requesting screen capture permission..."
+
+            requestScreenCapture()
         }
+
+        setContentView(root)
     }
-}
 
-@Composable
-fun SignalHome(
-    status: String,
-    onScanClick: () -> Unit
-) {
+    private fun requestScreenCapture() {
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
+        val captureIntent =
+            mediaProjectionManager.createScreenCaptureIntent()
 
-        horizontalAlignment =
-            Alignment.CenterHorizontally,
+        screenCaptureLauncher.launch(captureIntent)
+    }
 
-        verticalArrangement =
-            Arrangement.Center
-    ) {
+    override fun onDestroy() {
 
-        Text(
-            text = "Quotex AI Signal",
-            style =
-                MaterialTheme.typography.headlineSmall
-        )
-
-        Button(
-            onClick = onScanClick
-        ) {
-
-            Text("SCAN CHART")
-        }
-
-        Text(
-            text = status
-        )
+        super.onDestroy()
     }
 }
