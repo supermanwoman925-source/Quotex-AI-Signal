@@ -83,19 +83,48 @@ body {
     outline: none;
 }
 
-/* TIMEFRAME */
+#asset:focus {
+    border-color: #36d985;
+}
+
+/* SIGNAL DURATION */
 
 .timeframe-section {
     margin-bottom: 22px;
 }
 
+.timeframe-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 9px;
+}
+
 .timeframe {
+    min-height: 44px;
     border: 1px solid #2a443b;
     background: #10231d;
     color: #65e6a5;
     border-radius: 10px;
-    padding: 10px 20px;
+    padding: 10px 8px;
+    font-size: 14px;
     font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.timeframe:hover {
+    border-color: #36d985;
+}
+
+.timeframe.active {
+    background: #36d985;
+    border-color: #36d985;
+    color: #04100b;
+    box-shadow: 0 5px 16px rgba(54, 217, 133, 0.18);
+}
+
+.timeframe:active {
+    transform: scale(0.96);
 }
 
 /* ANALYSIS CARD */
@@ -158,6 +187,7 @@ body {
     margin-top: 10px;
     color: #84948f;
     font-size: 13px;
+    line-height: 1.5;
 }
 
 /* CONFIDENCE */
@@ -200,6 +230,11 @@ body {
     cursor: pointer;
     margin-bottom: 18px;
     box-shadow: 0 8px 25px rgba(54, 217, 133, 0.16);
+    transition: 0.2s ease;
+}
+
+.scan-button:hover {
+    filter: brightness(1.05);
 }
 
 .scan-button:active {
@@ -208,6 +243,7 @@ body {
 
 .scan-button:disabled {
     opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* WARNING */
@@ -293,11 +329,52 @@ body {
         font-size: 19px;
     }
 
+    .top-bar p {
+        font-size: 12px;
+    }
+
+    .timeframe-buttons {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
     .signal {
         font-size: 26px;
     }
 
     .signal-icon {
         font-size: 38px;
+    }
+
+    .analysis-card,
+    .history-card {
+        padding: 15px;
+    }
+}
+
+/* VERY SMALL PHONES */
+
+@media (max-width: 320px) {
+
+    .app {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+
+    .top-bar h1 {
+        font-size: 18px;
+    }
+
+    .status {
+        font-size: 10px;
+    }
+
+    .timeframe {
+        font-size: 13px;
+        min-height: 42px;
+    }
+
+    .scan-button {
+        height: 54px;
+        font-size: 15px;
     }
 }
