@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
@@ -24,6 +23,7 @@ class ScreenCaptureService : Service() {
     private var imageReader: ImageReader? = null
 
     companion object {
+
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
 
@@ -58,18 +58,26 @@ class ScreenCaptureService : Service() {
         startId: Int
     ): Int {
 
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val resultCode =
-            intent?.getIntExtra(EXTRA_RESULT_CODE, -1) ?: -1
+            intent.getIntExtra(
+                EXTRA_RESULT_CODE,
+                -1
+            )
 
         val resultData =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent?.getParcelableExtra(
+                intent.getParcelableExtra(
                     EXTRA_DATA,
                     Intent::class.java
                 )
             } else {
                 @Suppress("DEPRECATION")
-                intent?.getParcelableExtra(EXTRA_DATA)
+                intent.getParcelableExtra(EXTRA_DATA)
             }
 
         if (resultCode == -1 || resultData == null) {
@@ -77,7 +85,10 @@ class ScreenCaptureService : Service() {
             return START_NOT_STICKY
         }
 
-        startScreenCapture(resultCode, resultData)
+        startScreenCapture(
+            resultCode,
+            resultData
+        )
 
         return START_STICKY
     }
@@ -87,13 +98,17 @@ class ScreenCaptureService : Service() {
         resultData: Intent
     ) {
 
-        val projectionManager =
+        if (mediaProjection != null) {
+            return
+        }
+
+        val mediaProjectionManager =
             getSystemService(
-                Context.MEDIA_PROJECTION_SERVICE
+                MEDIA_PROJECTION_SERVICE
             ) as MediaProjectionManager
 
         mediaProjection =
-            projectionManager.getMediaProjection(
+            mediaProjectionManager.getMediaProjection(
                 resultCode,
                 resultData
             )
@@ -112,24 +127,34 @@ class ScreenCaptureService : Service() {
         val height = metrics.heightPixels
         val density = metrics.densityDpi
 
-        imageReader = ImageReader.newInstance(
-            width,
-            height,
-            PixelFormat.RGBA_8888,
-            2
-        )
+        imageReader =
+            ImageReader.newInstance(
+                width,
+                height,
+                PixelFormat.RGBA_8888,
+                2
+            )
 
         imageReader?.setOnImageAvailableListener(
             { reader ->
 
-                val image = reader.acquireLatestImage()
+                val image =
+                    reader.acquireLatestImage()
 
                 if (image != null) {
 
-                    // Screen frame successfully received.
-                    // Chart analysis will be added in the next step.
+                    try {
 
-                    image.close()
+                        /*
+                         * Screen frame received here.
+                         *
+                         * This is where the future chart-analysis
+                         * engine will process the captured screen.
+                         */
+
+                    } finally {
+                        image.close()
+                    }
                 }
 
             },
@@ -138,7 +163,7 @@ class ScreenCaptureService : Service() {
 
         virtualDisplay =
             mediaProjection?.createVirtualDisplay(
-                "QuotexAISignalCapture",
+                "QuotexAIScreenCapture",
                 width,
                 height,
                 density,
@@ -148,46 +173,33 @@ class ScreenCaptureService : Service() {
                 null
             )
 
-        mediaProjection?.registerCallback(
-            object : MediaProjection.Callback() {
-
-                override fun onStop() {
-                    stopCapture()
-                    stopSelf()
-                }
-            },
-            null
-        )
-    }
-
-    private fun stopCapture() {
-
-        virtualDisplay?.release()
-        virtualDisplay = null
-
-        imageReader?.close()
-        imageReader = null
-
-        mediaProjection?.stop()
-        mediaProjection = null
+        if (virtualDisplay == null) {
+            stopSelf()
+        }
     }
 
     private fun createNotificationChannel() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Quotex AI Screen Capture",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel =
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Screen Capture",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+
+            channel.description =
+                "Screen capture service for Quotex AI Signal"
 
             val manager =
                 getSystemService(
                     NotificationManager::class.java
                 )
 
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(
+                channel
+            )
         }
     }
 
@@ -195,10 +207,15 @@ class ScreenCaptureService : Service() {
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(
+                this,
+                CHANNEL_ID
+            )
                 .setContentTitle("Quotex AI Signal")
-                .setContentText("Screen capture is active")
-                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setContentText("Screen capture is running")
+                .setSmallIcon(
+                    android.R.drawable.ic_menu_view
+                )
                 .setOngoing(true)
                 .build()
 
@@ -207,15 +224,26 @@ class ScreenCaptureService : Service() {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
                 .setContentTitle("Quotex AI Signal")
-                .setContentText("Screen capture is active")
-                .setSmallIcon(android.R.drawable.ic_menu_view)
+                .setContentText("Screen capture is running")
+                .setSmallIcon(
+                    android.R.drawable.ic_menu_view
+                )
                 .setOngoing(true)
                 .build()
         }
     }
 
     override fun onDestroy() {
-        stopCapture()
+
+        imageReader?.close()
+        imageReader = null
+
+        virtualDisplay?.release()
+        virtualDisplay = null
+
+        mediaProjection?.stop()
+        mediaProjection = null
+
         super.onDestroy()
     }
 
