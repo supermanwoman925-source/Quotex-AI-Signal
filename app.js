@@ -1,6 +1,11 @@
 (() => {
   'use strict';
 
+  /* =========================================================
+     QUOTEX AI SIGNAL
+     STEP 1 - VISUAL CHART ANALYZER
+     ========================================================= */
+
   const $ = (id) => document.getElementById(id);
 
   const assetSelect = $('asset');
@@ -32,8 +37,14 @@
   let previousFrame = null;
   let history = [];
 
+  /* =========================================================
+     BASIC UI
+     ========================================================= */
+
   function text(element, value) {
-    if (element) element.textContent = value;
+    if (element) {
+      element.textContent = value;
+    }
   }
 
   function clamp(value, min, max) {
@@ -51,7 +62,9 @@
 
     signalEl.className =
       'signal ' +
-      signal.toLowerCase().replace(/[^a-z]/g, '-');
+      String(signal)
+        .toLowerCase()
+        .replace(/[^a-z]/g, '-');
 
     if (signalIconEl) {
       signalIconEl.textContent =
@@ -83,16 +96,20 @@
       100
     );
 
-    text(confidenceValueEl, `${value}%`);
+    text(
+      confidenceValueEl,
+      `${value}%`
+    );
 
     if (confidenceFillEl) {
-      confidenceFillEl.style.width = `${value}%`;
+      confidenceFillEl.style.width =
+        `${value}%`;
     }
   }
 
-  /* -----------------------------
-     DURATION BUTTONS
-  ----------------------------- */
+  /* =========================================================
+     DURATIONS
+     ========================================================= */
 
   function initDurations() {
     const buttons =
@@ -101,9 +118,8 @@
       );
 
     buttons.forEach((button) => {
-      const duration = Number(
-        button.dataset.duration
-      );
+      const duration =
+        Number(button.dataset.duration);
 
       if (!DURATIONS.includes(duration)) {
         return;
@@ -130,16 +146,16 @@
           setSignal(
             'WAIT',
             null,
-            `Scan duration: ${duration} seconds.`
+            `Selected analysis duration: ${duration}s`
           );
         }
       );
     });
   }
 
-  /* -----------------------------
+  /* =========================================================
      SCREEN CAPTURE
-  ----------------------------- */
+     ========================================================= */
 
   async function startScreenCapture() {
     if (
@@ -147,7 +163,7 @@
       !navigator.mediaDevices.getDisplayMedia
     ) {
       throw new Error(
-        'This browser does not support screen capture.'
+        'Screen capture is not supported by this browser.'
       );
     }
 
@@ -155,8 +171,8 @@
       await navigator.mediaDevices.getDisplayMedia({
         video: {
           frameRate: {
-            ideal: 5,
-            max: 10
+            ideal: 8,
+            max: 12
           }
         },
         audio: false
@@ -167,7 +183,7 @@
 
     if (!track) {
       throw new Error(
-        'Screen capture track was not created.'
+        'No screen capture track was created.'
       );
     }
 
@@ -200,26 +216,33 @@
 
     await video.play();
 
-    const width =
-      Math.min(
-        video.videoWidth || 1280,
-        1280
-      );
+    const sourceWidth =
+      video.videoWidth || 1280;
 
-    const height =
+    const sourceHeight =
+      video.videoHeight || 720;
+
+    const scale =
       Math.min(
-        video.videoHeight || 720,
-        720
+        1,
+        1280 / sourceWidth,
+        720 / sourceHeight
       );
 
     canvas =
       document.createElement('canvas');
 
     canvas.width =
-      Math.max(320, width);
+      Math.max(
+        320,
+        Math.floor(sourceWidth * scale)
+      );
 
     canvas.height =
-      Math.max(240, height);
+      Math.max(
+        240,
+        Math.floor(sourceHeight * scale)
+      );
 
     ctx =
       canvas.getContext(
@@ -256,6 +279,8 @@
     video = null;
 
     if (canvas) {
+      canvas.width = 1;
+      canvas.height = 1;
       canvas.remove();
     }
 
@@ -265,9 +290,9 @@
     previousFrame = null;
   }
 
-  /* -----------------------------
+  /* =========================================================
      FRAME CAPTURE
-  ----------------------------- */
+     ========================================================= */
 
   function captureFrame() {
     if (
@@ -295,11 +320,56 @@
     );
   }
 
-  /* -----------------------------
-     VISUAL CHART ANALYSIS
-  ----------------------------- */
+  /* =========================================================
+     COLOR CLASSIFICATION
+     ========================================================= */
 
-  function analyzeFrame(frame) {
+  function classifyPixel(r, g, b) {
+    const max =
+      Math.max(r, g, b);
+
+    const min =
+      Math.min(r, g, b);
+
+    const saturation =
+      max - min;
+
+    if (saturation < 25) {
+      return 0;
+    }
+
+    /*
+      Green candle
+    */
+
+    if (
+      g > r * 1.16 &&
+      g > b * 1.04 &&
+      saturation > 28
+    ) {
+      return 1;
+    }
+
+    /*
+      Red candle
+    */
+
+    if (
+      r > g * 1.16 &&
+      r > b * 1.05 &&
+      saturation > 28
+    ) {
+      return -1;
+    }
+
+    return 0;
+  }
+
+  /* =========================================================
+     DYNAMIC CHART REGION
+     ========================================================= */
+
+  function findChartRegion(frame) {
     if (!frame) return null;
 
     const {
@@ -309,119 +379,450 @@
     } = frame;
 
     /*
-      Broad chart area.
+      We intentionally avoid a fixed Quotex
+      coordinate system.
 
-      This is deliberately NOT based
-      on fixed Quotex coordinates.
+      Search the middle portion of the screen.
     */
 
-    const x0 =
+    const top =
+      Math.floor(height * 0.10);
+
+    const bottom =
+      Math.floor(height * 0.88);
+
+    const left =
       Math.floor(width * 0.02);
 
-    const x1 =
-      Math.floor(width * 0.82);
+    const right =
+      Math.floor(width * 0.98);
 
-    const y0 =
-      Math.floor(height * 0.15);
-
-    const y1 =
-      Math.floor(height * 0.78);
-
-    let green = 0;
-    let red = 0;
-    let total = 0;
-
-    let brightness = 0;
-
-    const step =
+    const columns =
       Math.max(
-        3,
-        Math.floor(
-          Math.min(
-            width,
-            height
-          ) / 180
-        )
+        80,
+        Math.floor(width / 4)
       );
 
-    for (
-      let y = y0;
-      y < y1;
-      y += step
-    ) {
+    const scores =
+      new Array(columns).fill(0);
+
+    const xScale =
+      (right - left) / columns;
+
+    const yStep =
+      Math.max(
+        4,
+        Math.floor(height / 160)
+      );
+
+    for (let c = 0; c < columns; c++) {
+      const x =
+        Math.floor(
+          left +
+          c * xScale
+        );
+
+      let colored = 0;
+
       for (
-        let x = x0;
-        x < x1;
-        x += step
+        let y = top;
+        y < bottom;
+        y += yStep
       ) {
         const i =
           (y * width + x) * 4;
 
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        const max =
-          Math.max(r, g, b);
-
-        const min =
-          Math.min(r, g, b);
-
-        const saturation =
-          max - min;
-
-        brightness +=
-          (r + g + b) / 3;
-
-        total++;
-
-        /*
-          Green candle pixels
-        */
-
         if (
-          g > r * 1.20 &&
-          g > b * 1.08 &&
-          saturation > 30
+          classifyPixel(
+            data[i],
+            data[i + 1],
+            data[i + 2]
+          ) !== 0
         ) {
-          green++;
-          continue;
+          colored++;
+        }
+      }
+
+      scores[c] = colored;
+    }
+
+    /*
+      Find the strongest continuous
+      chart-like region.
+    */
+
+    let bestStart = 0;
+    let bestEnd = columns - 1;
+
+    let currentStart = 0;
+    let currentScore = 0;
+
+    let bestScore = 0;
+
+    for (let i = 0; i < columns; i++) {
+      const score = scores[i];
+
+      if (score >= 2) {
+        currentScore += score;
+      } else {
+        if (currentScore > bestScore) {
+          bestScore = currentScore;
+          bestStart = currentStart;
+          bestEnd = i - 1;
         }
 
-        /*
-          Red candle pixels
-        */
-
-        if (
-          r > g * 1.20 &&
-          r > b * 1.10 &&
-          saturation > 30
-        ) {
-          red++;
-        }
+        currentStart = i + 1;
+        currentScore = 0;
       }
     }
 
-    if (!total) {
+    if (currentScore > bestScore) {
+      bestScore = currentScore;
+      bestStart = currentStart;
+      bestEnd = columns - 1;
+    }
+
+    /*
+      If the automatic region is weak,
+      return a broad safe region.
+    */
+
+    if (
+      bestScore < columns * 0.15
+    ) {
+      return {
+        x0: left,
+        x1: right,
+        y0: top,
+        y1: bottom
+      };
+    }
+
+    return {
+      x0:
+        Math.floor(
+          left +
+          bestStart * xScale
+        ),
+
+      x1:
+        Math.floor(
+          left +
+          (bestEnd + 1) * xScale
+        ),
+
+      y0: top,
+      y1: bottom
+    };
+  }
+
+  /* =========================================================
+     CANDLE DETECTION
+     ========================================================= */
+
+  function detectCandles(frame, region) {
+    if (!frame || !region) {
+      return [];
+    }
+
+    const {
+      data,
+      width
+    } = frame;
+
+    const {
+      x0,
+      x1,
+      y0,
+      y1
+    } = region;
+
+    const columnData = [];
+
+    const step =
+      Math.max(
+        2,
+        Math.floor(
+          (x1 - x0) / 240
+        )
+      );
+
+    for (
+      let x = x0;
+      x < x1;
+      x += step
+    ) {
+      let green = 0;
+      let red = 0;
+
+      let top = y1;
+      let bottom = y0;
+
+      for (
+        let y = y0;
+        y < y1;
+        y += 2
+      ) {
+        const i =
+          (y * width + x) * 4;
+
+        const type =
+          classifyPixel(
+            data[i],
+            data[i + 1],
+            data[i + 2]
+          );
+
+        if (type === 1) {
+          green++;
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+
+        if (type === -1) {
+          red++;
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      }
+
+      const colored =
+        green + red;
+
+      columnData.push({
+        x,
+        green,
+        red,
+        colored,
+        top,
+        bottom
+      });
+    }
+
+    /*
+      Group neighboring active columns.
+    */
+
+    const groups = [];
+
+    let current = null;
+
+    columnData.forEach((column) => {
+      if (column.colored >= 2) {
+        if (!current) {
+          current = [];
+        }
+
+        current.push(column);
+      } else {
+        if (current && current.length) {
+          groups.push(current);
+        }
+
+        current = null;
+      }
+    });
+
+    if (current && current.length) {
+      groups.push(current);
+    }
+
+    /*
+      Convert groups into candle-like objects.
+    */
+
+    const candles = [];
+
+    groups.forEach((group) => {
+      if (group.length < 1) {
+        return;
+      }
+
+      const green =
+        group.reduce(
+          (sum, item) =>
+            sum + item.green,
+          0
+        );
+
+      const red =
+        group.reduce(
+          (sum, item) =>
+            sum + item.red,
+          0
+        );
+
+      const total =
+        green + red;
+
+      if (total < 3) {
+        return;
+      }
+
+      const direction =
+        green > red
+          ? 1
+          : red > green
+          ? -1
+          : 0;
+
+      const top =
+        Math.min(
+          ...group.map(
+            (item) => item.top
+          )
+        );
+
+      const bottom =
+        Math.max(
+          ...group.map(
+            (item) => item.bottom
+          )
+        );
+
+      const center =
+        group.reduce(
+          (sum, item) =>
+            sum + item.x,
+          0
+        ) /
+        group.length;
+
+      const bodyStrength =
+        Math.abs(
+          green - red
+        ) / total;
+
+      candles.push({
+        x: center,
+        direction,
+        bodyStrength,
+        top,
+        bottom
+      });
+    });
+
+    /*
+      Keep the latest candle-like
+      structures.
+    */
+
+    return candles
+      .slice(-30);
+  }
+
+  /* =========================================================
+     FRAME ANALYSIS
+     ========================================================= */
+
+  function analyzeFrame(frame) {
+    if (!frame) {
       return null;
     }
 
-    const colored =
-      green + red;
+    const region =
+      findChartRegion(frame);
 
-    const activity =
-      colored / total;
+    if (!region) {
+      return null;
+    }
 
-    const balance =
-      colored > 0
-        ? (green - red) / colored
-        : 0;
-
-    const avgBrightness =
-      brightness / total;
+    const candles =
+      detectCandles(
+        frame,
+        region
+      );
 
     /*
-      Frame-to-frame motion
+      Need enough visual structures
+      before attempting directional analysis.
+    */
+
+    if (candles.length < 3) {
+      return {
+        valid: false,
+        candleCount: candles.length,
+        direction: 0,
+        strength: 0,
+        momentum: 0,
+        rejection: 0
+      };
+    }
+
+    const recent =
+      candles.slice(-8);
+
+    let directionSum = 0;
+    let strengthSum = 0;
+
+    recent.forEach((candle) => {
+      directionSum +=
+        candle.direction;
+
+      strengthSum +=
+        candle.bodyStrength;
+    });
+
+    const direction =
+      directionSum /
+      recent.length;
+
+    const strength =
+      strengthSum /
+      recent.length;
+
+    /*
+      Momentum:
+      compare early recent candles
+      with latest candles.
+    */
+
+    const half =
+      Math.max(
+        1,
+        Math.floor(
+          recent.length / 2
+        )
+      );
+
+    const firstHalf =
+      recent.slice(
+        0,
+        half
+      );
+
+    const secondHalf =
+      recent.slice(
+        half
+      );
+
+    const firstDirection =
+      firstHalf.reduce(
+        (sum, candle) =>
+          sum + candle.direction,
+        0
+      );
+
+    const secondDirection =
+      secondHalf.reduce(
+        (sum, candle) =>
+          sum + candle.direction,
+        0
+      );
+
+    const momentum =
+      clamp(
+        (
+          secondDirection -
+          firstDirection
+        ) /
+        recent.length,
+        -1,
+        1
+      );
+
+    /*
+      Frame motion.
     */
 
     let motion = 0;
@@ -431,47 +832,46 @@
       previousFrame.data.length ===
         frame.data.length
     ) {
+      const previous =
+        previousFrame.data;
+
+      const current =
+        frame.data;
+
       let difference = 0;
       let samples = 0;
 
-      const p =
-        previousFrame.data;
-
-      const pixelStep =
-        Math.max(
-          6,
-          step * 3
-        );
+      const pixelStep = 12;
 
       for (
-        let y = y0;
-        y < y1;
+        let y = region.y0;
+        y < region.y1;
         y += pixelStep
       ) {
         for (
-          let x = x0;
-          x < x1;
+          let x = region.x0;
+          x < region.x1;
           x += pixelStep
         ) {
           const i =
-            (y * width + x) * 4;
+            (y * frame.width + x) * 4;
 
           difference +=
             Math.abs(
-              frame.data[i] -
-              p[i]
+              current[i] -
+              previous[i]
             );
 
           difference +=
             Math.abs(
-              frame.data[i + 1] -
-              p[i + 1]
+              current[i + 1] -
+              previous[i + 1]
             );
 
           difference +=
             Math.abs(
-              frame.data[i + 2] -
-              p[i + 2]
+              current[i + 2] -
+              previous[i + 2]
             );
 
           samples += 3;
@@ -493,126 +893,139 @@
     previousFrame = frame;
 
     return {
-      balance,
-      activity,
-      brightness: avgBrightness,
+      valid: true,
+      candleCount: candles.length,
+      direction,
+      strength,
+      momentum,
       motion
     };
   }
 
-  /* -----------------------------
+  /* =========================================================
      MULTI-FRAME DECISION
-  ----------------------------- */
+     ========================================================= */
 
   function makeDecision() {
-    if (
-      observations.length < 3
-    ) {
+    const valid =
+      observations.filter(
+        (item) => item.valid
+      );
+
+    if (valid.length < 3) {
       return {
         signal: 'WAIT',
         confidence: 0,
         message:
-          'Not enough chart frames.'
+          'Not enough clear candle data.'
       };
     }
 
     const average = (key) =>
-      observations.reduce(
+      valid.reduce(
         (sum, item) =>
           sum + item[key],
         0
       ) /
-      observations.length;
+      valid.length;
 
-    const balance =
-      average('balance');
-
-    const activity =
-      average('activity');
-
-    const brightness =
-      average('brightness');
-
-    /*
-      Reject unusable images.
-    */
-
-    if (
-      brightness < 15 ||
-      activity < 0.002
-    ) {
-      return {
-        signal: 'WAIT',
-        confidence: 0,
-        message:
-          'Chart candles are not clear enough.'
-      };
-    }
-
-    /*
-      Direction strength.
-    */
+    const direction =
+      average('direction');
 
     const strength =
-      Math.abs(balance);
+      average('strength');
+
+    const momentum =
+      average('momentum');
+
+    const motion =
+      average('motion');
 
     /*
       Direction consistency.
     */
 
-    const sign =
-      Math.sign(balance);
+    const directionSign =
+      Math.sign(direction);
 
     const sameDirection =
-      observations.filter(
+      valid.filter(
         (item) =>
           Math.sign(
-            item.balance
-          ) === sign
+            item.direction
+          ) === directionSign
       ).length;
 
     const consistency =
       sameDirection /
-      observations.length;
+      valid.length;
 
     /*
-      IMPORTANT:
-
-      No signal when the visual
-      evidence is weak.
+      Reject weak / unclear chart data.
     */
 
     if (
-      strength < 0.15 ||
+      Math.abs(direction) < 0.20 ||
       consistency < 0.60
     ) {
       return {
         signal: 'WAIT',
         confidence: 0,
         message:
-          'No sufficiently clear direction detected.'
+          'Candle direction is not clear enough.'
       };
     }
 
     /*
-      Visual-analysis confidence only.
-
-      This is NOT probability of profit.
+      Momentum must not strongly
+      contradict the visual direction.
     */
+
+    if (
+      directionSign !== 0 &&
+      Math.sign(momentum) !== 0 &&
+      Math.sign(momentum) !==
+        directionSign
+    ) {
+      return {
+        signal: 'WAIT',
+        confidence: 0,
+        message:
+          'Recent momentum is conflicting.'
+      };
+    }
+
+    /*
+      Visual evidence score.
+
+      This is NOT a probability
+      of winning a trade.
+    */
+
+    const evidence =
+      (
+        Math.abs(direction) * 0.45 +
+        strength * 0.25 +
+        consistency * 0.20 +
+        Math.abs(momentum) * 0.10
+      );
 
     const confidence =
       clamp(
         Math.round(
-          45 +
-          strength * 35 +
-          consistency * 20
+          40 +
+          evidence * 45 +
+          Math.min(
+            motion * 10,
+            5
+          )
         ),
-        0,
+        40,
         85
       );
 
     const signal =
-      balance > 0
+      direction > 0
         ? 'UP'
         : 'DOWN';
 
@@ -620,20 +1033,20 @@
       signal,
       confidence,
       message:
-        `Visual chart analysis completed for ${selectedDuration}s.`
+        `Visual candle analysis completed for ${selectedDuration}s.`
     };
   }
 
-  /* -----------------------------
+  /* =========================================================
      COUNTDOWN
-  ----------------------------- */
+     ========================================================= */
 
   function startCountdown(seconds) {
     let remaining = seconds;
 
     text(
       messageEl,
-      `Analyzing visible chart: ${remaining}s`
+      `Scanning visible chart: ${remaining}s`
     );
 
     countdownTimer =
@@ -652,14 +1065,14 @@
 
         text(
           messageEl,
-          `Analyzing visible chart: ${remaining}s`
+          `Scanning visible chart: ${remaining}s`
         );
       }, 1000);
   }
 
-  /* -----------------------------
+  /* =========================================================
      HISTORY
-  ----------------------------- */
+     ========================================================= */
 
   function addHistory(
     signal,
@@ -676,11 +1089,13 @@
       asset:
         assetSelect
           ? assetSelect.value
-          : 'AUTO',
+          : 'SCREEN',
 
       signal,
-
       confidence,
+
+      duration:
+        selectedDuration,
 
       time:
         new Date()
@@ -702,7 +1117,9 @@
       String(history.length)
     );
 
-    if (!historyListEl) return;
+    if (!historyListEl) {
+      return;
+    }
 
     if (!history.length) {
       historyListEl.innerHTML =
@@ -718,235 +1135,4 @@
             <div class="history-item">
               <span class="history-asset">
                 ${escapeHtml(item.asset)}
-              </span>
-
-              <strong class="history-signal ${item.signal.toLowerCase()}">
-                ${item.signal}
-              </strong>
-
-              <span class="history-time">
-                ${escapeHtml(item.time)}
-              </span>
-            </div>
-          `
-        )
-        .join('');
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
-  }
-
-  /* -----------------------------
-     CLEANUP
-  ----------------------------- */
-
-  function clearTimers() {
-    if (scanTimer) {
-      clearTimeout(scanTimer);
-      scanTimer = null;
-    }
-
-    if (countdownTimer) {
-      clearInterval(
-        countdownTimer
-      );
-
-      countdownTimer = null;
-    }
-  }
-
-  function finishScan(message) {
-    scanning = false;
-
-    clearTimers();
-
-    stopScreenCapture();
-
-    if (scanButton) {
-      scanButton.disabled = false;
-      scanButton.textContent =
-        'SCAN MARKET';
-    }
-
-    setMode('READY');
-
-    if (message) {
-      text(
-        messageEl,
-        message
-      );
-    }
-  }
-
-  /* -----------------------------
-     MAIN SCAN
-  ----------------------------- */
-
-  async function scanMarket() {
-    if (scanning) return;
-
-    scanning = true;
-
-    observations = [];
-    previousFrame = null;
-
-    if (scanButton) {
-      scanButton.disabled = true;
-      scanButton.textContent =
-        'STARTING SCREEN SCAN...';
-    }
-
-    setMode('CAPTURE');
-
-    setSignal(
-      'WAIT',
-      null,
-      'Allow screen capture and select the chart screen.'
-    );
-
-    try {
-      await startScreenCapture();
-
-      setMode('SCANNING');
-
-      if (scanButton) {
-        scanButton.textContent =
-          `SCANNING ${selectedDuration}s...`;
-      }
-
-      startCountdown(
-        selectedDuration
-      );
-
-      const start =
-        performance.now();
-
-      /*
-        Capture several frames
-        throughout the selected
-        duration.
-      */
-
-      const sample = () => {
-        if (!scanning) return;
-
-        const frame =
-          captureFrame();
-
-        const result =
-          analyzeFrame(frame);
-
-        if (result) {
-          observations.push(
-            result
-          );
-        }
-
-        const elapsed =
-          (performance.now() -
-            start) /
-          1000;
-
-        if (
-          elapsed >=
-          selectedDuration
-        ) {
-          finishAnalysis();
-          return;
-        }
-
-        scanTimer =
-          setTimeout(
-            sample,
-            250
-          );
-      };
-
-      sample();
-
-    } catch (error) {
-      console.error(
-        'Screen scan error:',
-        error
-      );
-
-      finishScan(
-        error.message ||
-        'Screen capture failed.'
-      );
-
-      setSignal(
-        'WAIT',
-        null,
-        error.message ||
-          'Screen capture failed.'
-      );
-    }
-  }
-
-  function finishAnalysis() {
-    clearTimers();
-
-    const result =
-      makeDecision();
-
-    setSignal(
-      result.signal,
-      result.confidence,
-      result.message
-    );
-
-    if (
-      result.signal === 'UP' ||
-      result.signal === 'DOWN'
-    ) {
-      addHistory(
-        result.signal,
-        result.confidence
-      );
-    }
-
-    if (scanButton) {
-      scanButton.textContent =
-        'SCAN MARKET';
-    }
-
-    stopScreenCapture();
-
-    scanning = false;
-
-    setMode('READY');
-  }
-
-  /* -----------------------------
-     BUTTON
-  ----------------------------- */
-
-  if (scanButton) {
-    scanButton.addEventListener(
-      'click',
-      scanMarket
-    );
-  }
-
-  /* -----------------------------
-     START
-  ----------------------------- */
-
-  initDurations();
-
-  setSignal(
-    'WAIT',
-    null,
-    'Select duration and press SCAN MARKET.'
-  );
-
-  setMode('READY');
-
-})();
+ 
