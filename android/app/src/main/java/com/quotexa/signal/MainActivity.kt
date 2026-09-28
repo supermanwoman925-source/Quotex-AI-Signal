@@ -2,6 +2,7 @@ package com.quotexa.signal
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -19,7 +20,9 @@ import androidx.compose.ui.Modifier
 
 class MainActivity : ComponentActivity() {
 
-    private var scanStatus by mutableStateOf("Ready to scan")
+    private lateinit var mediaProjectionManager: MediaProjectionManager
+
+    private var capturePermissionIntent: Intent? = null
 
     private val screenCaptureLauncher =
         registerForActivityResult(
@@ -27,65 +30,78 @@ class MainActivity : ComponentActivity() {
         ) { result ->
 
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                scanStatus = "SCREEN CAPTURE ACTIVE"
+
+                capturePermissionIntent = result.data
+
+                statusMessage = "Screen capture permission granted"
+
             } else {
-                scanStatus = "Screen capture cancelled"
+
+                statusMessage = "Screen capture permission denied"
             }
         }
+
+    companion object {
+        var statusMessage by mutableStateOf("Ready to scan chart")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        mediaProjectionManager =
+            getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                    as MediaProjectionManager
+
         setContent {
-            SignalHome(
-                scanStatus = scanStatus,
-                onScanClick = {
-                    startScreenCapture()
-                }
-            )
+            MaterialTheme {
+                SignalHome(
+                    status = statusMessage,
+                    onScanClick = {
+
+                        if (capturePermissionIntent == null) {
+
+                            val intent =
+                                mediaProjectionManager.createScreenCaptureIntent()
+
+                            screenCaptureLauncher.launch(intent)
+
+                        } else {
+
+                            statusMessage = "Screen capture is ready"
+                        }
+                    }
+                )
+            }
         }
-    }
-
-    private fun startScreenCapture() {
-
-        val mediaProjectionManager =
-            getSystemService(
-                Context.MEDIA_PROJECTION_SERVICE
-            ) as MediaProjectionManager
-
-        val captureIntent =
-            mediaProjectionManager.createScreenCaptureIntent()
-
-        screenCaptureLauncher.launch(captureIntent)
     }
 }
 
 @Composable
 fun SignalHome(
-    scanStatus: String,
+    status: String,
     onScanClick: () -> Unit
 ) {
-    MaterialTheme {
 
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+
+        Text(
+            text = "Quotex AI Signal",
+            style = MaterialTheme.typography.headlineSmall
+        )
+
+        Button(
+            onClick = onScanClick
         ) {
 
-            Text(
-                text = "Quotex AI Signal"
-            )
-
-            Button(
-                onClick = onScanClick
-            ) {
-                Text("SCAN CHART")
-            }
-
-            Text(
-                text = scanStatus
-            )
+            Text("SCAN CHART")
         }
+
+        Text(
+            text = status
+        )
     }
 }
