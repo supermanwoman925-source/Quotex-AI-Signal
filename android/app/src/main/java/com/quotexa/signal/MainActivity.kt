@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
@@ -27,37 +28,76 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
 
-            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            if (
+                result.resultCode == Activity.RESULT_OK &&
+                result.data != null
+            ) {
 
-                statusMessage = "Screen capture permission granted"
+                val serviceIntent =
+                    Intent(
+                        this,
+                        ScreenCaptureService::class.java
+                    ).apply {
+
+                        putExtra(
+                            ScreenCaptureService.EXTRA_RESULT_CODE,
+                            result.resultCode
+                        )
+
+                        putExtra(
+                            ScreenCaptureService.EXTRA_DATA,
+                            result.data
+                        )
+                    }
+
+                ContextCompat.startForegroundService(
+                    this,
+                    serviceIntent
+                )
+
+                statusMessage =
+                    "Screen capture is running"
 
             } else {
 
-                statusMessage = "Screen capture permission denied"
+                statusMessage =
+                    "Screen capture permission denied"
             }
         }
 
     companion object {
-        var statusMessage by mutableStateOf("Ready to scan chart")
+
+        var statusMessage by mutableStateOf(
+            "Ready to scan chart"
+        )
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
+
         super.onCreate(savedInstanceState)
 
         mediaProjectionManager =
-            getSystemService(Context.MEDIA_PROJECTION_SERVICE)
-                    as MediaProjectionManager
+            getSystemService(
+                Context.MEDIA_PROJECTION_SERVICE
+            ) as MediaProjectionManager
 
         setContent {
+
             MaterialTheme {
+
                 SignalHome(
                     status = statusMessage,
+
                     onScanClick = {
 
                         val intent =
-                            mediaProjectionManager.createScreenCaptureIntent()
+                            mediaProjectionManager
+                                .createScreenCaptureIntent()
 
-                        screenCaptureLauncher.launch(intent)
+                        screenCaptureLauncher
+                            .launch(intent)
                     }
                 )
             }
@@ -73,18 +113,24 @@ fun SignalHome(
 
     Column(
         modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+
+        horizontalAlignment =
+            Alignment.CenterHorizontally,
+
+        verticalArrangement =
+            Arrangement.Center
     ) {
 
         Text(
             text = "Quotex AI Signal",
-            style = MaterialTheme.typography.headlineSmall
+            style =
+                MaterialTheme.typography.headlineSmall
         )
 
         Button(
             onClick = onScanClick
         ) {
+
             Text("SCAN CHART")
         }
 
