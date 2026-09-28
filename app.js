@@ -14,34 +14,44 @@
   const historyCountEl = $('history-count');
   const modeEl = $('mode');
 
-  const DURATION_VALUES = [5, 10, 15, 20, 45, 60];
+  const DURATIONS = [5, 10, 15, 20, 45, 60];
   const MAX_HISTORY = 20;
 
   let selectedDuration = 5;
+
   let stream = null;
   let video = null;
   let canvas = null;
   let ctx = null;
+
+  let scanning = false;
   let scanTimer = null;
   let countdownTimer = null;
-  let scanning = false;
-  let history = [];
-  let previousFrame = null;
 
-  function setText(el, text) {
-    if (el) el.textContent = text;
+  let observations = [];
+  let previousFrame = null;
+  let history = [];
+
+  function text(element, value) {
+    if (element) element.textContent = value;
   }
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
 
+  function setMode(value) {
+    text(modeEl, value);
+  }
+
   function setSignal(signal, confidence = null, message = '') {
     if (!signalEl) return;
 
     signalEl.textContent = signal;
+
     signalEl.className =
-      'signal ' + signal.toLowerCase().replace(/[^a-z]/g, '-');
+      'signal ' +
+      signal.toLowerCase().replace(/[^a-z]/g, '-');
 
     if (signalIconEl) {
       signalIconEl.textContent =
@@ -52,10 +62,13 @@
           : '—';
     }
 
-    setText(messageEl, message);
+    text(messageEl, message);
 
-    if (confidence === null || !Number.isFinite(confidence)) {
-      setText(confidenceValueEl, '—');
+    if (
+      confidence === null ||
+      !Number.isFinite(confidence)
+    ) {
+      text(confidenceValueEl, '—');
 
       if (confidenceFillEl) {
         confidenceFillEl.style.width = '0%';
@@ -64,70 +77,172 @@
       return;
     }
 
-    const value = clamp(Math.round(confidence), 0, 100);
+    const value = clamp(
+      Math.round(confidence),
+      0,
+      100
+    );
 
-    setText(confidenceValueEl, `${value}%`);
+    text(confidenceValueEl, `${value}%`);
 
     if (confidenceFillEl) {
       confidenceFillEl.style.width = `${value}%`;
     }
   }
 
-  function setMode(text) {
-    setText(modeEl, text);
-  }
+  /* -----------------------------
+     DURATION BUTTONS
+  ----------------------------- */
 
-  function getDuration() {
-    return selectedDuration;
-  }
-
-  function findDurationButtons() {
-    return Array.from(document.querySelectorAll('button')).filter(
-      (button) => {
-        const match = button.textContent.trim().match(/^(5|10|15|20|45|60)s$/);
-        return Boolean(match);
-      }
-    );
-  }
-
-  function initDurationButtons() {
-    const buttons = findDurationButtons();
-
-    buttons.forEach((button) => {
-      const seconds = Number(
-        button.textContent.trim().replace('s', '')
+  function initDurations() {
+    const buttons =
+      document.querySelectorAll(
+        '[data-duration]'
       );
 
-      if (!DURATION_VALUES.includes(seconds)) return;
+    buttons.forEach((button) => {
+      const duration = Number(
+        button.dataset.duration
+      );
+
+      if (!DURATIONS.includes(duration)) {
+        return;
+      }
 
       button.classList.toggle(
         'active',
-        seconds === selectedDuration
+        duration === selectedDuration
       );
 
-      button.addEventListener('click', () => {
-        if (scanning) return;
+      button.addEventListener(
+        'click',
+        () => {
+          if (scanning) return;
 
-        selectedDuration = seconds;
+          selectedDuration = duration;
 
-        buttons.forEach((item) =>
-          item.classList.remove('active')
-        );
+          buttons.forEach((item) => {
+            item.classList.remove('active');
+          });
 
-        button.classList.add('active');
+          button.classList.add('active');
 
-        setSignal(
-          'NO SIGNAL',
-          null,
-          `Scan duration set to ${seconds}s.`
-        );
-      });
+          setSignal(
+            'WAIT',
+            null,
+            `Scan duration: ${duration} seconds.`
+          );
+        }
+      );
     });
   }
 
-  function stopStream() {
+  /* -----------------------------
+     SCREEN CAPTURE
+  ----------------------------- */
+
+  async function startScreenCapture() {
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getDisplayMedia
+    ) {
+      throw new Error(
+        'This browser does not support screen capture.'
+      );
+    }
+
+    stream =
+      await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: {
+            ideal: 5,
+            max: 10
+          }
+        },
+        audio: false
+      });
+
+    const track =
+      stream.getVideoTracks()[0];
+
+    if (!track) {
+      throw new Error(
+        'Screen capture track was not created.'
+      );
+    }
+
+    track.addEventListener(
+      'ended',
+      () => {
+        if (scanning) {
+          finishScan(
+            'Screen capture stopped.'
+          );
+        }
+      }
+    );
+
+    video =
+      document.createElement('video');
+
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.srcObject = stream;
+
+    video.style.position = 'fixed';
+    video.style.left = '-10000px';
+    video.style.top = '0';
+    video.style.width = '1px';
+    video.style.height = '1px';
+
+    document.body.appendChild(video);
+
+    await video.play();
+
+    const width =
+      Math.min(
+        video.videoWidth || 1280,
+        1280
+      );
+
+    const height =
+      Math.min(
+        video.videoHeight || 720,
+        720
+      );
+
+    canvas =
+      document.createElement('canvas');
+
+    canvas.width =
+      Math.max(320, width);
+
+    canvas.height =
+      Math.max(240, height);
+
+    ctx =
+      canvas.getContext(
+        '2d',
+        {
+          willReadFrequently: true
+        }
+      );
+
+    if (!ctx) {
+      throw new Error(
+        'Canvas analysis is unavailable.'
+      );
+    }
+  }
+
+  function stopScreenCapture() {
     if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
+      stream
+        .getTracks()
+        .forEach((track) => {
+          track.stop();
+        });
     }
 
     stream = null;
@@ -146,91 +261,19 @@
 
     canvas = null;
     ctx = null;
+
+    previousFrame = null;
   }
 
-  async function requestScreen() {
-    if (
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getDisplayMedia
-    ) {
-      throw new Error(
-        'Screen capture is not supported by this browser.'
-      );
-    }
-
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: {
-          ideal: 5,
-          max: 10
-        }
-      },
-      audio: false
-    });
-
-    const track = stream.getVideoTracks()[0];
-
-    if (!track) {
-      throw new Error(
-        'No screen video track was provided.'
-      );
-    }
-
-    track.addEventListener('ended', () => {
-      if (scanning) {
-        finishScan('Screen sharing stopped.');
-      }
-    });
-
-    video = document.createElement('video');
-
-    video.muted = true;
-    video.playsInline = true;
-    video.autoplay = true;
-    video.srcObject = stream;
-
-    video.style.position = 'fixed';
-    video.style.left = '-99999px';
-    video.style.top = '0';
-    video.style.width = '1px';
-    video.style.height = '1px';
-
-    document.body.appendChild(video);
-
-    await video.play();
-
-    canvas = document.createElement('canvas');
-
-    canvas.width = Math.max(
-      320,
-      Math.min(video.videoWidth || 1280, 1280)
-    );
-
-    canvas.height = Math.max(
-      240,
-      Math.min(video.videoHeight || 720, 720)
-    );
-
-    canvas.style.display = 'none';
-
-    document.body.appendChild(canvas);
-
-    ctx = canvas.getContext('2d', {
-      willReadFrequently: true
-    });
-
-    if (!ctx) {
-      throw new Error(
-        'Canvas analysis is unavailable.'
-      );
-    }
-  }
+  /* -----------------------------
+     FRAME CAPTURE
+  ----------------------------- */
 
   function captureFrame() {
     if (
       !video ||
-      !ctx ||
       !canvas ||
+      !ctx ||
       video.readyState < 2
     ) {
       return null;
@@ -252,122 +295,153 @@
     );
   }
 
-  function analyzeFrame(imageData) {
-    if (!imageData) return null;
+  /* -----------------------------
+     VISUAL CHART ANALYSIS
+  ----------------------------- */
 
-    const { data, width, height } = imageData;
+  function analyzeFrame(frame) {
+    if (!frame) return null;
+
+    const {
+      data,
+      width,
+      height
+    } = frame;
 
     /*
-     * Initial chart-analysis region.
-     *
-     * This is intentionally broad and is NOT tied
-     * to Quotex coordinates.
-     */
+      Broad chart area.
 
-    const x0 = Math.floor(width * 0.03);
-    const x1 = Math.floor(width * 0.78);
+      This is deliberately NOT based
+      on fixed Quotex coordinates.
+    */
 
-    const y0 = Math.floor(height * 0.18);
-    const y1 = Math.floor(height * 0.72);
+    const x0 =
+      Math.floor(width * 0.02);
+
+    const x1 =
+      Math.floor(width * 0.82);
+
+    const y0 =
+      Math.floor(height * 0.15);
+
+    const y1 =
+      Math.floor(height * 0.78);
 
     let green = 0;
     let red = 0;
-    let active = 0;
+    let total = 0;
 
-    let weightedX = 0;
-    let weightedY = 0;
+    let brightness = 0;
 
-    let totalBrightness = 0;
-    let samples = 0;
+    const step =
+      Math.max(
+        3,
+        Math.floor(
+          Math.min(
+            width,
+            height
+          ) / 180
+        )
+      );
 
-    const step = Math.max(
-      2,
-      Math.floor(
-        Math.min(width, height) / 220
-      )
-    );
-
-    for (let y = y0; y < y1; y += step) {
-      for (let x = x0; x < x1; x += step) {
-        const i = (y * width + x) * 4;
+    for (
+      let y = y0;
+      y < y1;
+      y += step
+    ) {
+      for (
+        let x = x0;
+        x < x1;
+        x += step
+      ) {
+        const i =
+          (y * width + x) * 4;
 
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
 
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
+        const max =
+          Math.max(r, g, b);
 
-        const saturation = max - min;
+        const min =
+          Math.min(r, g, b);
 
-        const brightness =
+        const saturation =
+          max - min;
+
+        brightness +=
           (r + g + b) / 3;
 
-        totalBrightness += brightness;
-        samples += 1;
+        total++;
+
+        /*
+          Green candle pixels
+        */
 
         if (
-          g > r * 1.22 &&
+          g > r * 1.20 &&
           g > b * 1.08 &&
-          saturation > 35
+          saturation > 30
         ) {
-          green += 1;
+          green++;
+          continue;
+        }
 
-          weightedX += x;
-          weightedY += y;
+        /*
+          Red candle pixels
+        */
 
-          active += 1;
-        } else if (
-          r > g * 1.22 &&
-          r > b * 1.12 &&
-          saturation > 35
+        if (
+          r > g * 1.20 &&
+          r > b * 1.10 &&
+          saturation > 30
         ) {
-          red += 1;
-
-          weightedX += x;
-          weightedY += y;
-
-          active += 1;
+          red++;
         }
       }
     }
 
-    const totalColored = green + red;
+    if (!total) {
+      return null;
+    }
 
-    const greenRatio =
-      samples ? green / samples : 0;
+    const colored =
+      green + red;
 
-    const redRatio =
-      samples ? red / samples : 0;
+    const activity =
+      colored / total;
 
-    const directionalBalance =
-      totalColored
-        ? (green - red) / totalColored
+    const balance =
+      colored > 0
+        ? (green - red) / colored
         : 0;
 
-    const activityRatio =
-      samples
-        ? totalColored / samples
-        : 0;
+    const avgBrightness =
+      brightness / total;
 
-    const averageBrightness =
-      samples
-        ? totalBrightness / samples
-        : 0;
+    /*
+      Frame-to-frame motion
+    */
 
     let motion = 0;
 
     if (
       previousFrame &&
-      previousFrame.data.length === data.length
+      previousFrame.data.length ===
+        frame.data.length
     ) {
-      let diff = 0;
-      let compared = 0;
+      let difference = 0;
+      let samples = 0;
 
-      const pixelStep = Math.max(
-        4,
-        step * 2
-      );
+      const p =
+        previousFrame.data;
+
+      const pixelStep =
+        Math.max(
+          6,
+          step * 3
+        );
 
       for (
         let y = y0;
@@ -382,168 +456,221 @@
           const i =
             (y * width + x) * 4;
 
-          const p = previousFrame.data;
+          difference +=
+            Math.abs(
+              frame.data[i] -
+              p[i]
+            );
 
-          diff += Math.abs(
-            data[i] - p[i]
-          );
+          difference +=
+            Math.abs(
+              frame.data[i + 1] -
+              p[i + 1]
+            );
 
-          diff += Math.abs(
-            data[i + 1] - p[i + 1]
-          );
+          difference +=
+            Math.abs(
+              frame.data[i + 2] -
+              p[i + 2]
+            );
 
-          diff += Math.abs(
-            data[i + 2] - p[i + 2]
-          );
-
-          compared += 3;
+          samples += 3;
         }
       }
 
-      motion =
-        compared
-          ? clamp(
-              diff / compared / 255,
-              0,
-              1
-            )
-          : 0;
+      if (samples) {
+        motion =
+          clamp(
+            difference /
+              samples /
+              255,
+            0,
+            1
+          );
+      }
     }
 
-    previousFrame = imageData;
+    previousFrame = frame;
 
     return {
-      greenRatio,
-      redRatio,
-      directionalBalance,
-      activityRatio,
-      averageBrightness,
-      motion,
-
-      centerX:
-        active
-          ? weightedX / active / width
-          : 0.5,
-
-      centerY:
-        active
-          ? weightedY / active / height
-          : 0.5
+      balance,
+      activity,
+      brightness: avgBrightness,
+      motion
     };
   }
 
-  function combineObservations(observations) {
-    if (!observations.length) {
+  /* -----------------------------
+     MULTI-FRAME DECISION
+  ----------------------------- */
+
+  function makeDecision() {
+    if (
+      observations.length < 3
+    ) {
       return {
         signal: 'WAIT',
         confidence: 0,
-        reason:
-          'No usable chart pixels detected.'
+        message:
+          'Not enough chart frames.'
       };
     }
 
-    const avg = (key) =>
+    const average = (key) =>
       observations.reduce(
         (sum, item) =>
           sum + item[key],
         0
-      ) / observations.length;
+      ) /
+      observations.length;
 
     const balance =
-      avg('directionalBalance');
+      average('balance');
 
     const activity =
-      avg('activityRatio');
-
-    const motion =
-      avg('motion');
+      average('activity');
 
     const brightness =
-      avg('averageBrightness');
+      average('brightness');
 
     /*
-     * Conservative visual gate.
-     *
-     * This is only a visual experiment.
-     * It is NOT a financial prediction model.
-     */
+      Reject unusable images.
+    */
 
-    if (activity < 0.003) {
+    if (
+      brightness < 15 ||
+      activity < 0.002
+    ) {
       return {
         signal: 'WAIT',
         confidence: 0,
-        reason:
-          'Chart candles were not detected clearly enough.'
+        message:
+          'Chart candles are not clear enough.'
       };
     }
 
-    if (brightness < 15) {
-      return {
-        signal: 'WAIT',
-        confidence: 0,
-        reason:
-          'Captured image is too dark to analyze.'
-      };
-    }
+    /*
+      Direction strength.
+    */
 
     const strength =
       Math.abs(balance);
 
-    const consistency =
+    /*
+      Direction consistency.
+    */
+
+    const sign =
+      Math.sign(balance);
+
+    const sameDirection =
       observations.filter(
         (item) =>
           Math.sign(
-            item.directionalBalance
-          ) === Math.sign(balance)
-      ).length /
+            item.balance
+          ) === sign
+      ).length;
+
+    const consistency =
+      sameDirection /
       observations.length;
 
-    const confidence = clamp(
-      Math.round(
-        50 +
-          strength * 35 +
-          consistency * 15
-      ),
-      0,
-      85
-    );
+    /*
+      IMPORTANT:
+
+      No signal when the visual
+      evidence is weak.
+    */
 
     if (
-      strength < 0.18 ||
-      consistency < 0.55
+      strength < 0.15 ||
+      consistency < 0.60
     ) {
       return {
         signal: 'WAIT',
-        confidence: Math.min(
-          confidence,
-          55
-        ),
-        reason:
-          'The visible chart does not provide a sufficiently clear direction.'
+        confidence: 0,
+        message:
+          'No sufficiently clear direction detected.'
       };
     }
 
+    /*
+      Visual-analysis confidence only.
+
+      This is NOT probability of profit.
+    */
+
+    const confidence =
+      clamp(
+        Math.round(
+          45 +
+          strength * 35 +
+          consistency * 20
+        ),
+        0,
+        85
+      );
+
+    const signal =
+      balance > 0
+        ? 'UP'
+        : 'DOWN';
+
     return {
-      signal:
-        balance > 0
-          ? 'UP'
-          : 'DOWN',
-
+      signal,
       confidence,
-
-      reason:
-        `Visual scan completed. ` +
-        `Candle-color balance=${balance.toFixed(2)}, ` +
-        `activity=${activity.toFixed(3)}, ` +
-        `motion=${motion.toFixed(3)}.`
+      message:
+        `Visual chart analysis completed for ${selectedDuration}s.`
     };
   }
+
+  /* -----------------------------
+     COUNTDOWN
+  ----------------------------- */
+
+  function startCountdown(seconds) {
+    let remaining = seconds;
+
+    text(
+      messageEl,
+      `Analyzing visible chart: ${remaining}s`
+    );
+
+    countdownTimer =
+      setInterval(() => {
+        remaining--;
+
+        if (remaining <= 0) {
+          clearInterval(
+            countdownTimer
+          );
+
+          countdownTimer = null;
+
+          return;
+        }
+
+        text(
+          messageEl,
+          `Analyzing visible chart: ${remaining}s`
+        );
+      }, 1000);
+  }
+
+  /* -----------------------------
+     HISTORY
+  ----------------------------- */
 
   function addHistory(
     signal,
     confidence
   ) {
-    if (signal === 'WAIT') return;
+    if (
+      signal !== 'UP' &&
+      signal !== 'DOWN'
+    ) {
+      return;
+    }
 
     history.unshift({
       asset:
@@ -556,7 +683,8 @@
       confidence,
 
       time:
-        new Date().toLocaleTimeString()
+        new Date()
+          .toLocaleTimeString()
     });
 
     history =
@@ -569,7 +697,7 @@
   }
 
   function renderHistory() {
-    setText(
+    text(
       historyCountEl,
       String(history.length)
     );
@@ -588,11 +716,17 @@
         .map(
           (item) => `
             <div class="history-item">
-              <span>${escapeHtml(item.asset)}</span>
-              <strong class="history-${item.signal.toLowerCase()}">
+              <span class="history-asset">
+                ${escapeHtml(item.asset)}
+              </span>
+
+              <strong class="history-signal ${item.signal.toLowerCase()}">
                 ${item.signal}
               </strong>
-              <small>${escapeHtml(item.time)}</small>
+
+              <span class="history-time">
+                ${escapeHtml(item.time)}
+              </span>
             </div>
           `
         )
@@ -601,134 +735,105 @@
 
   function escapeHtml(value) {
     return String(value)
-      .replaceAll(
-        '&',
-        '&amp;'
-      )
-      .replaceAll(
-        '<',
-        '&lt;'
-      )
-      .replaceAll(
-        '>',
-        '&gt;'
-      )
-      .replaceAll(
-        '"',
-        '&quot;'
-      )
-      .replaceAll(
-        "'",
-        '&#039;'
-      );
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   }
+
+  /* -----------------------------
+     CLEANUP
+  ----------------------------- */
 
   function clearTimers() {
     if (scanTimer) {
       clearTimeout(scanTimer);
+      scanTimer = null;
     }
 
     if (countdownTimer) {
       clearInterval(
         countdownTimer
       );
-    }
 
-    scanTimer = null;
-    countdownTimer = null;
+      countdownTimer = null;
+    }
   }
 
-  function finishScan(
-    message = 'Scan finished.'
-  ) {
+  function finishScan(message) {
     scanning = false;
 
     clearTimers();
 
-    stopStream();
-
-    previousFrame = null;
+    stopScreenCapture();
 
     if (scanButton) {
       scanButton.disabled = false;
+      scanButton.textContent =
+        'SCAN MARKET';
     }
 
     setMode('READY');
 
     if (message) {
-      setText(
+      text(
         messageEl,
         message
       );
     }
   }
 
-  function startCountdown(seconds) {
-    let remaining = seconds;
-
-    const update = () => {
-      setText(
-        messageEl,
-        `Signal window: ${remaining}s remaining.`
-      );
-
-      remaining -= 1;
-
-      if (remaining < 0) {
-        clearInterval(
-          countdownTimer
-        );
-      }
-    };
-
-    update();
-
-    countdownTimer =
-      setInterval(
-        update,
-        1000
-      );
-  }
+  /* -----------------------------
+     MAIN SCAN
+  ----------------------------- */
 
   async function scanMarket() {
     if (scanning) return;
 
     scanning = true;
 
-    clearTimers();
-
+    observations = [];
     previousFrame = null;
 
     if (scanButton) {
       scanButton.disabled = true;
+      scanButton.textContent =
+        'STARTING SCREEN SCAN...';
     }
 
-    setMode('SCREEN SCAN');
+    setMode('CAPTURE');
 
     setSignal(
       'WAIT',
       null,
-      'Choose the Quotex/chart screen when the browser asks for screen sharing.'
+      'Allow screen capture and select the chart screen.'
     );
 
     try {
-      await requestScreen();
+      await startScreenCapture();
 
-      const observations = [];
+      setMode('SCANNING');
 
-      const startedAt =
+      if (scanButton) {
+        scanButton.textContent =
+          `SCANNING ${selectedDuration}s...`;
+      }
+
+      startCountdown(
+        selectedDuration
+      );
+
+      const start =
         performance.now();
 
-      const scanLength =
-        Math.max(
-          2500,
-          Math.min(
-            8000,
-            getDuration() * 1000
-          )
-        );
+      /*
+        Capture several frames
+        throughout the selected
+        duration.
+      */
 
-      const collect = () => {
+      const sample = () => {
         if (!scanning) return;
 
         const frame =
@@ -743,89 +848,85 @@
           );
         }
 
+        const elapsed =
+          (performance.now() -
+            start) /
+          1000;
+
         if (
-          performance.now() -
-            startedAt >=
-          scanLength
+          elapsed >=
+          selectedDuration
         ) {
-          const result =
-            combineObservations(
-              observations
-            );
-
-          setSignal(
-            result.signal,
-            result.confidence,
-            result.reason
-          );
-
-          addHistory(
-            result.signal,
-            result.confidence
-          );
-
-          setMode(
-            result.signal ===
-              'WAIT'
-              ? 'WAIT'
-              : 'ANALYZED'
-          );
-
-          startCountdown(
-            getDuration()
-          );
-
-          scanTimer =
-            setTimeout(
-              () =>
-                finishScan(
-                  'Scan complete. Press SCAN to analyze again.'
-                ),
-              getDuration() * 1000
-            );
-
+          finishAnalysis();
           return;
         }
 
         scanTimer =
           setTimeout(
-            collect,
-            350
+            sample,
+            250
           );
       };
 
-      collect();
+      sample();
 
     } catch (error) {
-      console.error(error);
+      console.error(
+        'Screen scan error:',
+        error
+      );
+
+      finishScan(
+        error.message ||
+        'Screen capture failed.'
+      );
 
       setSignal(
         'WAIT',
         null,
-        error &&
-        error.message
-          ? error.message
-          : 'Screen scan could not be started.'
+        error.message ||
+          'Screen capture failed.'
       );
-
-      finishScan();
     }
   }
 
-  if (assetSelect) {
-    assetSelect.addEventListener(
-      'change',
-      () => {
-        if (!scanning) {
-          setSignal(
-            'NO SIGNAL',
-            null,
-            'Press SCAN to analyze the selected chart.'
-          );
-        }
-      }
+  function finishAnalysis() {
+    clearTimers();
+
+    const result =
+      makeDecision();
+
+    setSignal(
+      result.signal,
+      result.confidence,
+      result.message
     );
+
+    if (
+      result.signal === 'UP' ||
+      result.signal === 'DOWN'
+    ) {
+      addHistory(
+        result.signal,
+        result.confidence
+      );
+    }
+
+    if (scanButton) {
+      scanButton.textContent =
+        'SCAN MARKET';
+    }
+
+    stopScreenCapture();
+
+    scanning = false;
+
+    setMode('READY');
   }
+
+  /* -----------------------------
+     BUTTON
+  ----------------------------- */
 
   if (scanButton) {
     scanButton.addEventListener(
@@ -834,15 +935,18 @@
     );
   }
 
-  initDurationButtons();
+  /* -----------------------------
+     START
+  ----------------------------- */
 
-  renderHistory();
+  initDurations();
+
+  setSignal(
+    'WAIT',
+    null,
+    'Select duration and press SCAN MARKET.'
+  );
 
   setMode('READY');
 
-  setSignal(
-    'NO SIGNAL',
-    null,
-    'Press SCAN to analyze the selected chart.'
-  );
 })();
