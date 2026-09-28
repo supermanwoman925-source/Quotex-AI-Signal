@@ -1,520 +1,848 @@
-// ======================================================
-// Quotex AI Signal
-// Demo Analysis Engine
-// ======================================================
+(() => {
+  'use strict';
 
-const assetSelect = document.getElementById("asset");
-const scanButton = document.getElementById("scan-button");
+  const $ = (id) => document.getElementById(id);
 
-const signalElement = document.getElementById("signal");
-const signalIcon = document.getElementById("signal-icon");
-const signalMessage = document.getElementById("signal-message");
+  const assetSelect = $('asset');
+  const scanButton = $('scan-button');
+  const signalEl = $('signal');
+  const signalIconEl = $('signal-icon');
+  const messageEl = $('signal-message');
+  const confidenceValueEl = $('confidence-value');
+  const confidenceFillEl = $('confidence-fill');
+  const historyListEl = $('history-list');
+  const historyCountEl = $('history-count');
+  const modeEl = $('mode');
 
-const confidenceValue = document.getElementById("confidence-value");
-const confidenceFill = document.getElementById("confidence-fill");
+  const DURATION_VALUES = [5, 10, 15, 20, 45, 60];
+  const MAX_HISTORY = 20;
 
-const historyList = document.getElementById("history-list");
-const historyCount = document.getElementById("history-count");
+  let selectedDuration = 5;
+  let stream = null;
+  let video = null;
+  let canvas = null;
+  let ctx = null;
+  let scanTimer = null;
+  let countdownTimer = null;
+  let scanning = false;
+  let history = [];
+  let previousFrame = null;
 
+  function setText(el, text) {
+    if (el) el.textContent = text;
+  }
 
-// ======================================================
-// APPLICATION STATE
-// ======================================================
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
 
-let signalHistory = [];
+  function setSignal(signal, confidence = null, message = '') {
+    if (!signalEl) return;
 
+    signalEl.textContent = signal;
+    signalEl.className =
+      'signal ' + signal.toLowerCase().replace(/[^a-z]/g, '-');
 
-// ======================================================
-// DEMO CANDLE GENERATOR
-// ======================================================
-
-function generateDemoCandles(count = 30) {
-
-    const candles = [];
-
-    let price = 100;
-
-    for (let i = 0; i < count; i++) {
-
-        const open = price;
-
-        const movement =
-            (Math.random() - 0.5) * 2;
-
-        const close =
-            open + movement;
-
-        const high =
-            Math.max(open, close) +
-            Math.random() * 0.5;
-
-        const low =
-            Math.min(open, close) -
-            Math.random() * 0.5;
-
-        candles.push({
-            open: open,
-            high: high,
-            low: low,
-            close: close
-        });
-
-        price = close;
+    if (signalIconEl) {
+      signalIconEl.textContent =
+        signal === 'UP'
+          ? '↑'
+          : signal === 'DOWN'
+          ? '↓'
+          : '—';
     }
 
-    return candles;
-}
+    setText(messageEl, message);
 
+    if (confidence === null || !Number.isFinite(confidence)) {
+      setText(confidenceValueEl, '—');
 
-// ======================================================
-// BASIC TECHNICAL ANALYSIS
-// ======================================================
+      if (confidenceFillEl) {
+        confidenceFillEl.style.width = '0%';
+      }
 
-function calculateEMA(values, period) {
-
-    if (values.length < period) {
-        return null;
+      return;
     }
 
-    const multiplier =
-        2 / (period + 1);
+    const value = clamp(Math.round(confidence), 0, 100);
 
-    let ema = values
-        .slice(0, period)
-        .reduce((sum, value) => sum + value, 0) / period;
+    setText(confidenceValueEl, `${value}%`);
 
-    for (let i = period; i < values.length; i++) {
+    if (confidenceFillEl) {
+      confidenceFillEl.style.width = `${value}%`;
+    }
+  }
 
-        ema =
-            (values[i] - ema) * multiplier + ema;
+  function setMode(text) {
+    setText(modeEl, text);
+  }
+
+  function getDuration() {
+    return selectedDuration;
+  }
+
+  function findDurationButtons() {
+    return Array.from(document.querySelectorAll('button')).filter(
+      (button) => {
+        const match = button.textContent.trim().match(/^(5|10|15|20|45|60)s$/);
+        return Boolean(match);
+      }
+    );
+  }
+
+  function initDurationButtons() {
+    const buttons = findDurationButtons();
+
+    buttons.forEach((button) => {
+      const seconds = Number(
+        button.textContent.trim().replace('s', '')
+      );
+
+      if (!DURATION_VALUES.includes(seconds)) return;
+
+      button.classList.toggle(
+        'active',
+        seconds === selectedDuration
+      );
+
+      button.addEventListener('click', () => {
+        if (scanning) return;
+
+        selectedDuration = seconds;
+
+        buttons.forEach((item) =>
+          item.classList.remove('active')
+        );
+
+        button.classList.add('active');
+
+        setSignal(
+          'NO SIGNAL',
+          null,
+          `Scan duration set to ${seconds}s.`
+        );
+      });
+    });
+  }
+
+  function stopStream() {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
     }
 
-    return ema;
-}
+    stream = null;
 
-
-function calculateRSI(candles, period = 14) {
-
-    if (candles.length <= period) {
-        return null;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      video.remove();
     }
 
-    let gains = 0;
-    let losses = 0;
+    video = null;
 
-    for (let i = candles.length - period; i < candles.length; i++) {
+    if (canvas) {
+      canvas.remove();
+    }
 
-        const previous =
-            candles[i - 1].close;
+    canvas = null;
+    ctx = null;
+  }
 
-        const current =
-            candles[i].close;
+  async function requestScreen() {
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getDisplayMedia
+    ) {
+      throw new Error(
+        'Screen capture is not supported by this browser.'
+      );
+    }
 
-        const change =
-            current - previous;
-
-        if (change > 0) {
-            gains += change;
-        } else {
-            losses += Math.abs(change);
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: {
+          ideal: 5,
+          max: 10
         }
+      },
+      audio: false
+    });
+
+    const track = stream.getVideoTracks()[0];
+
+    if (!track) {
+      throw new Error(
+        'No screen video track was provided.'
+      );
     }
 
-    if (losses === 0) {
-        return 100;
+    track.addEventListener('ended', () => {
+      if (scanning) {
+        finishScan('Screen sharing stopped.');
+      }
+    });
+
+    video = document.createElement('video');
+
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.srcObject = stream;
+
+    video.style.position = 'fixed';
+    video.style.left = '-99999px';
+    video.style.top = '0';
+    video.style.width = '1px';
+    video.style.height = '1px';
+
+    document.body.appendChild(video);
+
+    await video.play();
+
+    canvas = document.createElement('canvas');
+
+    canvas.width = Math.max(
+      320,
+      Math.min(video.videoWidth || 1280, 1280)
+    );
+
+    canvas.height = Math.max(
+      240,
+      Math.min(video.videoHeight || 720, 720)
+    );
+
+    canvas.style.display = 'none';
+
+    document.body.appendChild(canvas);
+
+    ctx = canvas.getContext('2d', {
+      willReadFrequently: true
+    });
+
+    if (!ctx) {
+      throw new Error(
+        'Canvas analysis is unavailable.'
+      );
+    }
+  }
+
+  function captureFrame() {
+    if (
+      !video ||
+      !ctx ||
+      !canvas ||
+      video.readyState < 2
+    ) {
+      return null;
     }
 
-    const averageGain =
-        gains / period;
+    ctx.drawImage(
+      video,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
 
-    const averageLoss =
-        losses / period;
+    return ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+  }
 
-    const relativeStrength =
-        averageGain / averageLoss;
+  function analyzeFrame(imageData) {
+    if (!imageData) return null;
 
-    return 100 -
-        (100 / (1 + relativeStrength));
-}
+    const { data, width, height } = imageData;
 
+    /*
+     * Initial chart-analysis region.
+     *
+     * This is intentionally broad and is NOT tied
+     * to Quotex coordinates.
+     */
 
-// ======================================================
-// CANDLE MOMENTUM
-// ======================================================
+    const x0 = Math.floor(width * 0.03);
+    const x1 = Math.floor(width * 0.78);
 
-function calculateMomentum(candles) {
+    const y0 = Math.floor(height * 0.18);
+    const y1 = Math.floor(height * 0.72);
 
-    if (candles.length < 5) {
-        return 0;
-    }
+    let green = 0;
+    let red = 0;
+    let active = 0;
 
-    const latest =
-        candles[candles.length - 1].close;
+    let weightedX = 0;
+    let weightedY = 0;
 
-    const previous =
-        candles[candles.length - 5].close;
+    let totalBrightness = 0;
+    let samples = 0;
 
-    return latest - previous;
-}
+    const step = Math.max(
+      2,
+      Math.floor(
+        Math.min(width, height) / 220
+      )
+    );
 
+    for (let y = y0; y < y1; y += step) {
+      for (let x = x0; x < x1; x += step) {
+        const i = (y * width + x) * 4;
 
-// ======================================================
-// SIGNAL ANALYSIS
-// ======================================================
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
 
-function analyzeCandles(candles) {
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
 
-    if (!candles || candles.length < 15) {
+        const saturation = max - min;
 
-        return {
-            signal: "NO SIGNAL",
-            confidence: 0,
-            message: "Not enough candle data."
-        };
-    }
+        const brightness =
+          (r + g + b) / 3;
 
-    const closes =
-        candles.map(candle => candle.close);
+        totalBrightness += brightness;
+        samples += 1;
 
-    const ema =
-        calculateEMA(closes, 9);
+        if (
+          g > r * 1.22 &&
+          g > b * 1.08 &&
+          saturation > 35
+        ) {
+          green += 1;
 
-    const rsi =
-        calculateRSI(candles, 14);
+          weightedX += x;
+          weightedY += y;
 
-    const momentum =
-        calculateMomentum(candles);
+          active += 1;
+        } else if (
+          r > g * 1.22 &&
+          r > b * 1.12 &&
+          saturation > 35
+        ) {
+          red += 1;
 
-    const latestClose =
-        closes[closes.length - 1];
+          weightedX += x;
+          weightedY += y;
 
-    let upScore = 0;
-    let downScore = 0;
-
-    // EMA direction
-    if (ema !== null) {
-
-        if (latestClose > ema) {
-            upScore++;
+          active += 1;
         }
+      }
+    }
 
-        if (latestClose < ema) {
-            downScore++;
+    const totalColored = green + red;
+
+    const greenRatio =
+      samples ? green / samples : 0;
+
+    const redRatio =
+      samples ? red / samples : 0;
+
+    const directionalBalance =
+      totalColored
+        ? (green - red) / totalColored
+        : 0;
+
+    const activityRatio =
+      samples
+        ? totalColored / samples
+        : 0;
+
+    const averageBrightness =
+      samples
+        ? totalBrightness / samples
+        : 0;
+
+    let motion = 0;
+
+    if (
+      previousFrame &&
+      previousFrame.data.length === data.length
+    ) {
+      let diff = 0;
+      let compared = 0;
+
+      const pixelStep = Math.max(
+        4,
+        step * 2
+      );
+
+      for (
+        let y = y0;
+        y < y1;
+        y += pixelStep
+      ) {
+        for (
+          let x = x0;
+          x < x1;
+          x += pixelStep
+        ) {
+          const i =
+            (y * width + x) * 4;
+
+          const p = previousFrame.data;
+
+          diff += Math.abs(
+            data[i] - p[i]
+          );
+
+          diff += Math.abs(
+            data[i + 1] - p[i + 1]
+          );
+
+          diff += Math.abs(
+            data[i + 2] - p[i + 2]
+          );
+
+          compared += 3;
         }
+      }
+
+      motion =
+        compared
+          ? clamp(
+              diff / compared / 255,
+              0,
+              1
+            )
+          : 0;
     }
 
-    // RSI
-    if (rsi !== null) {
+    previousFrame = imageData;
 
-        if (rsi > 50 && rsi < 70) {
-            upScore++;
-        }
+    return {
+      greenRatio,
+      redRatio,
+      directionalBalance,
+      activityRatio,
+      averageBrightness,
+      motion,
 
-        if (rsi < 50 && rsi > 30) {
-            downScore++;
-        }
+      centerX:
+        active
+          ? weightedX / active / width
+          : 0.5,
+
+      centerY:
+        active
+          ? weightedY / active / height
+          : 0.5
+    };
+  }
+
+  function combineObservations(observations) {
+    if (!observations.length) {
+      return {
+        signal: 'WAIT',
+        confidence: 0,
+        reason:
+          'No usable chart pixels detected.'
+      };
     }
 
-    // Momentum
-    if (momentum > 0) {
-        upScore++;
+    const avg = (key) =>
+      observations.reduce(
+        (sum, item) =>
+          sum + item[key],
+        0
+      ) / observations.length;
+
+    const balance =
+      avg('directionalBalance');
+
+    const activity =
+      avg('activityRatio');
+
+    const motion =
+      avg('motion');
+
+    const brightness =
+      avg('averageBrightness');
+
+    /*
+     * Conservative visual gate.
+     *
+     * This is only a visual experiment.
+     * It is NOT a financial prediction model.
+     */
+
+    if (activity < 0.003) {
+      return {
+        signal: 'WAIT',
+        confidence: 0,
+        reason:
+          'Chart candles were not detected clearly enough.'
+      };
     }
 
-    if (momentum < 0) {
-        downScore++;
+    if (brightness < 15) {
+      return {
+        signal: 'WAIT',
+        confidence: 0,
+        reason:
+          'Captured image is too dark to analyze.'
+      };
     }
 
-    const totalScore =
-        upScore + downScore;
+    const strength =
+      Math.abs(balance);
 
-    if (totalScore === 0) {
+    const consistency =
+      observations.filter(
+        (item) =>
+          Math.sign(
+            item.directionalBalance
+          ) === Math.sign(balance)
+      ).length /
+      observations.length;
 
-        return {
-            signal: "NO SIGNAL",
-            confidence: 0,
-            message: "Market conditions are unclear."
-        };
-    }
+    const confidence = clamp(
+      Math.round(
+        50 +
+          strength * 35 +
+          consistency * 15
+      ),
+      0,
+      85
+    );
 
-    if (upScore > downScore) {
-
-        const confidence =
-            Math.round(
-                55 + (upScore * 8)
-            );
-
-        return {
-            signal: "UP",
-            confidence: Math.min(confidence, 85),
-            message:
-                "Demo analysis shows bullish momentum."
-        };
-    }
-
-    if (downScore > upScore) {
-
-        const confidence =
-            Math.round(
-                55 + (downScore * 8)
-            );
-
-        return {
-            signal: "DOWN",
-            confidence: Math.min(confidence, 85),
-            message:
-                "Demo analysis shows bearish momentum."
-        };
+    if (
+      strength < 0.18 ||
+      consistency < 0.55
+    ) {
+      return {
+        signal: 'WAIT',
+        confidence: Math.min(
+          confidence,
+          55
+        ),
+        reason:
+          'The visible chart does not provide a sufficiently clear direction.'
+      };
     }
 
     return {
-        signal: "NO SIGNAL",
-        confidence: 0,
-        message:
-            "Signals are mixed. WAIT."
+      signal:
+        balance > 0
+          ? 'UP'
+          : 'DOWN',
+
+      confidence,
+
+      reason:
+        `Visual scan completed. ` +
+        `Candle-color balance=${balance.toFixed(2)}, ` +
+        `activity=${activity.toFixed(3)}, ` +
+        `motion=${motion.toFixed(3)}.`
     };
-}
+  }
 
+  function addHistory(
+    signal,
+    confidence
+  ) {
+    if (signal === 'WAIT') return;
 
-// ======================================================
-// DISPLAY SIGNAL
-// ======================================================
+    history.unshift({
+      asset:
+        assetSelect
+          ? assetSelect.value
+          : 'AUTO',
 
-function displaySignal(result) {
+      signal,
 
-    signalElement.className =
-        "signal neutral";
+      confidence,
 
-    signalIcon.textContent = "—";
+      time:
+        new Date().toLocaleTimeString()
+    });
 
-    confidenceValue.textContent = "—";
-
-    confidenceFill.style.width = "0%";
-
-    if (result.signal === "UP") {
-
-        signalElement.className =
-            "signal up";
-
-        signalElement.textContent =
-            "UP";
-
-        signalIcon.textContent =
-            "↑";
-
-        confidenceValue.textContent =
-            result.confidence + "%";
-
-        confidenceFill.style.width =
-            result.confidence + "%";
-
-        signalMessage.textContent =
-            result.message;
-
-        return;
-    }
-
-    if (result.signal === "DOWN") {
-
-        signalElement.className =
-            "signal down";
-
-        signalElement.textContent =
-            "DOWN";
-
-        signalIcon.textContent =
-            "↓";
-
-        confidenceValue.textContent =
-            result.confidence + "%";
-
-        confidenceFill.style.width =
-            result.confidence + "%";
-
-        signalMessage.textContent =
-            result.message;
-
-        return;
-    }
-
-    signalElement.textContent =
-        "NO SIGNAL";
-
-    signalMessage.textContent =
-        result.message;
-}
-
-
-// ======================================================
-// HISTORY
-// ======================================================
-
-function addHistory(result, asset) {
-
-    if (result.signal === "NO SIGNAL") {
-        return;
-    }
-
-    const item = {
-        asset: asset,
-        signal: result.signal,
-        time: new Date().toLocaleTimeString()
-    };
-
-    signalHistory.unshift(item);
-
-    if (signalHistory.length > 10) {
-        signalHistory.pop();
-    }
+    history =
+      history.slice(
+        0,
+        MAX_HISTORY
+      );
 
     renderHistory();
-}
+  }
 
+  function renderHistory() {
+    setText(
+      historyCountEl,
+      String(history.length)
+    );
 
-function renderHistory() {
+    if (!historyListEl) return;
 
-    historyCount.textContent =
-        signalHistory.length;
+    if (!history.length) {
+      historyListEl.innerHTML =
+        '<p class="empty-history">No signals recorded yet.</p>';
 
-    if (signalHistory.length === 0) {
-
-        historyList.innerHTML =
-            '<p class="empty-history">No signals recorded yet.</p>';
-
-        return;
+      return;
     }
 
-    historyList.innerHTML =
-        signalHistory.map(item => {
+    historyListEl.innerHTML =
+      history
+        .map(
+          (item) => `
+            <div class="history-item">
+              <span>${escapeHtml(item.asset)}</span>
+              <strong class="history-${item.signal.toLowerCase()}">
+                ${item.signal}
+              </strong>
+              <small>${escapeHtml(item.time)}</small>
+            </div>
+          `
+        )
+        .join('');
+  }
 
-            const signalClass =
-                item.signal === "UP"
-                    ? "up"
-                    : "down";
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll(
+        '&',
+        '&amp;'
+      )
+      .replaceAll(
+        '<',
+        '&lt;'
+      )
+      .replaceAll(
+        '>',
+        '&gt;'
+      )
+      .replaceAll(
+        '"',
+        '&quot;'
+      )
+      .replaceAll(
+        "'",
+        '&#039;'
+      );
+  }
 
-            return `
-                <div class="history-item">
+  function clearTimers() {
+    if (scanTimer) {
+      clearTimeout(scanTimer);
+    }
 
-                    <span class="history-asset">
-                        ${item.asset}
-                    </span>
+    if (countdownTimer) {
+      clearInterval(
+        countdownTimer
+      );
+    }
 
-                    <span class="history-signal ${signalClass}">
-                        ${item.signal}
-                    </span>
+    scanTimer = null;
+    countdownTimer = null;
+  }
 
-                    <span class="history-time">
-                        ${item.time}
-                    </span>
+  function finishScan(
+    message = 'Scan finished.'
+  ) {
+    scanning = false;
 
-                </div>
-            `;
+    clearTimers();
 
-        }).join("");
-}
+    stopStream();
 
+    previousFrame = null;
 
-// ======================================================
-// SCAN MARKET
-// ======================================================
+    if (scanButton) {
+      scanButton.disabled = false;
+    }
 
-function scanMarket() {
+    setMode('READY');
 
-    const selectedAsset =
-        assetSelect.value;
+    if (message) {
+      setText(
+        messageEl,
+        message
+      );
+    }
+  }
 
-    scanButton.disabled = true;
+  function startCountdown(seconds) {
+    let remaining = seconds;
 
-    scanButton.textContent =
-        "ANALYZING...";
+    const update = () => {
+      setText(
+        messageEl,
+        `Signal window: ${remaining}s remaining.`
+      );
 
-    signalElement.className =
-        "signal neutral";
+      remaining -= 1;
 
-    signalElement.textContent =
-        "ANALYZING";
+      if (remaining < 0) {
+        clearInterval(
+          countdownTimer
+        );
+      }
+    };
 
-    signalIcon.textContent =
-        "⟳";
+    update();
 
-    signalMessage.textContent =
-        "Analyzing demo candle data...";
+    countdownTimer =
+      setInterval(
+        update,
+        1000
+      );
+  }
 
-    confidenceValue.textContent =
-        "—";
+  async function scanMarket() {
+    if (scanning) return;
 
-    confidenceFill.style.width =
-        "0%";
+    scanning = true;
 
+    clearTimers();
 
-    setTimeout(() => {
+    previousFrame = null;
 
-        const candles =
-            generateDemoCandles(30);
+    if (scanButton) {
+      scanButton.disabled = true;
+    }
 
-        const result =
-            analyzeCandles(candles);
+    setMode('SCREEN SCAN');
 
-        displaySignal(result);
+    setSignal(
+      'WAIT',
+      null,
+      'Choose the Quotex/chart screen when the browser asks for screen sharing.'
+    );
 
-        addHistory(
-            result,
-            selectedAsset
+    try {
+      await requestScreen();
+
+      const observations = [];
+
+      const startedAt =
+        performance.now();
+
+      const scanLength =
+        Math.max(
+          2500,
+          Math.min(
+            8000,
+            getDuration() * 1000
+          )
         );
 
-        scanButton.disabled = false;
+      const collect = () => {
+        if (!scanning) return;
 
-        scanButton.textContent =
-            "SCAN MARKET";
+        const frame =
+          captureFrame();
 
-    }, 1200);
-}
+        const result =
+          analyzeFrame(frame);
 
+        if (result) {
+          observations.push(
+            result
+          );
+        }
 
-// ======================================================
-// SCAN BUTTON EVENT
-// ======================================================
+        if (
+          performance.now() -
+            startedAt >=
+          scanLength
+        ) {
+          const result =
+            combineObservations(
+              observations
+            );
 
-scanButton.addEventListener(
-    "click",
-    scanMarket
-);
+          setSignal(
+            result.signal,
+            result.confidence,
+            result.reason
+          );
 
+          addHistory(
+            result.signal,
+            result.confidence
+          );
 
-// ======================================================
-// ASSET CHANGE
-// ======================================================
+          setMode(
+            result.signal ===
+              'WAIT'
+              ? 'WAIT'
+              : 'ANALYZED'
+          );
 
-assetSelect.addEventListener(
-    "change",
-    () => {
+          startCountdown(
+            getDuration()
+          );
 
-        signalElement.className =
-            "signal neutral";
+          scanTimer =
+            setTimeout(
+              () =>
+                finishScan(
+                  'Scan complete. Press SCAN to analyze again.'
+                ),
+              getDuration() * 1000
+            );
 
-        signalElement.textContent =
-            "NO SIGNAL";
+          return;
+        }
 
-        signalIcon.textContent =
-            "—";
+        scanTimer =
+          setTimeout(
+            collect,
+            350
+          );
+      };
 
-        signalMessage.textContent =
-            "Press SCAN to analyze the selected asset.";
+      collect();
 
-        confidenceValue.textContent =
-            "—";
+    } catch (error) {
+      console.error(error);
 
-        confidenceFill.style.width =
-            "0%";
+      setSignal(
+        'WAIT',
+        null,
+        error &&
+        error.message
+          ? error.message
+          : 'Screen scan could not be started.'
+      );
+
+      finishScan();
     }
-);
+  }
 
+  if (assetSelect) {
+    assetSelect.addEventListener(
+      'change',
+      () => {
+        if (!scanning) {
+          setSignal(
+            'NO SIGNAL',
+            null,
+            'Press SCAN to analyze the selected chart.'
+          );
+        }
+      }
+    );
+  }
 
-// ======================================================
-// INITIAL STATE
-// ======================================================
+  if (scanButton) {
+    scanButton.addEventListener(
+      'click',
+      scanMarket
+    );
+  }
 
-renderHistory();
+  initDurationButtons();
 
-console.log(
-    "Quotex AI Signal loaded successfully."
-);
+  renderHistory();
+
+  setMode('READY');
+
+  setSignal(
+    'NO SIGNAL',
+    null,
+    'Press SCAN to analyze the selected chart.'
+  );
+})();
