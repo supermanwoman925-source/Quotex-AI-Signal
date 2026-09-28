@@ -1,7 +1,7 @@
 package com.quotexa.signal
 
 import android.app.Activity
-import android.content.Intent
+import android.content.Context
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
@@ -29,9 +27,9 @@ class MainActivity : ComponentActivity() {
         ) { result ->
 
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                scanStatus = "Screen capture permission granted"
+                scanStatus = "SCREEN CAPTURE ACTIVE"
             } else {
-                scanStatus = "Screen capture permission cancelled"
+                scanStatus = "Screen capture cancelled"
             }
         }
 
@@ -49,8 +47,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startScreenCapture() {
+
         val mediaProjectionManager =
-            getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            getSystemService(
+                Context.MEDIA_PROJECTION_SERVICE
+            ) as MediaProjectionManager
 
         val captureIntent =
             mediaProjectionManager.createScreenCaptureIntent()
@@ -59,12 +60,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 fun SignalHome(
     scanStatus: String,
     onScanClick: () -> Unit
 ) {
     MaterialTheme {
+
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
