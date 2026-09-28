@@ -22,16 +22,12 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
 
-    private var capturePermissionIntent: Intent? = null
-
     private val screenCaptureLauncher =
         registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
 
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-
-                capturePermissionIntent = result.data
 
                 statusMessage = "Screen capture permission granted"
 
@@ -58,17 +54,10 @@ class MainActivity : ComponentActivity() {
                     status = statusMessage,
                     onScanClick = {
 
-                        if (capturePermissionIntent == null) {
+                        val intent =
+                            mediaProjectionManager.createScreenCaptureIntent()
 
-                            val intent =
-                                mediaProjectionManager.createScreenCaptureIntent()
-
-                            screenCaptureLauncher.launch(intent)
-
-                        } else {
-
-                            statusMessage = "Screen capture is ready"
-                        }
+                        screenCaptureLauncher.launch(intent)
                     }
                 )
             }
@@ -96,7 +85,6 @@ fun SignalHome(
         Button(
             onClick = onScanClick
         ) {
-
             Text("SCAN CHART")
         }
 
