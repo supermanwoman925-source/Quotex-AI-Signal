@@ -1,7 +1,13 @@
-// ==========================================
+// ======================================================
 // Quotex AI Signal - Prototype
-// STEP 3: Scan + Demo Analysis + History
-// ==========================================
+// STEP 4: Signal Duration + Countdown
+// DEMO MODE ONLY
+// ======================================================
+
+
+// ======================================================
+// DOM ELEMENTS
+// ======================================================
 
 const assetSelect = document.getElementById("asset");
 const scanButton = document.getElementById("scan-button");
@@ -16,17 +22,53 @@ const confidenceFill = document.getElementById("confidence-fill");
 const historyList = document.getElementById("history-list");
 const historyCount = document.getElementById("history-count");
 
+const durationButtons = document.querySelectorAll(
+    ".timeframe[data-duration]"
+);
 
-// ------------------------------------------
-// Application State
-// ------------------------------------------
+
+// ======================================================
+// APPLICATION STATE
+// ======================================================
 
 let signalHistory = [];
 
+let selectedDuration = 5;
 
-// ------------------------------------------
-// Demo Candle Generator
-// ------------------------------------------
+let countdownTimer = null;
+
+
+// ======================================================
+// DURATION BUTTONS
+// ======================================================
+
+durationButtons.forEach((button) => {
+
+    button.addEventListener("click", () => {
+
+        durationButtons.forEach((item) => {
+            item.classList.remove("active");
+        });
+
+        button.classList.add("active");
+
+        selectedDuration = Number(
+            button.dataset.duration
+        );
+
+        resetSignal();
+
+        signalMessage.textContent =
+            `Signal duration selected: ${selectedDuration}s. Press SCAN to analyze.`;
+
+    });
+
+});
+
+
+// ======================================================
+// DEMO CANDLE GENERATOR
+// ======================================================
 
 function generateDemoCandles(count = 30) {
 
@@ -66,9 +108,9 @@ function generateDemoCandles(count = 30) {
 }
 
 
-// ------------------------------------------
-// Basic Technical Analysis
-// ------------------------------------------
+// ======================================================
+// BASIC DEMO TECHNICAL ANALYSIS
+// ======================================================
 
 function analyzeCandles(candles) {
 
@@ -77,341 +119,33 @@ function analyzeCandles(candles) {
         return {
             signal: "NO SIGNAL",
             confidence: 0,
-            reason: "Insufficient candle data."
+            icon: "—",
+            message: "Not enough demo candle data."
         };
+
     }
 
 
-    const recent = candles.slice(-5);
-
-
-    let bullish = 0;
-    let bearish = 0;
-
-
-    recent.forEach(candle => {
-
-        if (candle.close > candle.open) {
-            bullish++;
-        }
-
-        if (candle.close < candle.open) {
-            bearish++;
-        }
-
-    });
-
-
-    const lastCandle =
+    const last =
         candles[candles.length - 1];
 
-
-    let signal = "NO SIGNAL";
-    let confidence = 0;
-    let reason =
-        "Market conditions are unclear.";
+    const previous =
+        candles[candles.length - 2];
 
 
-    // --------------------------------------
-    // Simple demo decision logic
-    // --------------------------------------
+    const priceChange =
+        last.close - previous.close;
 
-    if (bullish >= 4) {
+
+    let signal;
+    let icon;
+    let confidence;
+
+
+    if (priceChange > 0) {
 
         signal = "UP";
-        confidence = 70 + Math.floor(Math.random() * 16);
+        icon = "▲";
 
-        reason =
-            "Recent demo candles show bullish momentum.";
-
-    }
-    else if (bearish >= 4) {
-
-        signal = "DOWN";
-        confidence = 70 + Math.floor(Math.random() * 16);
-
-        reason =
-            "Recent demo candles show bearish momentum.";
-
-    }
-    else {
-
-        signal = "NO SIGNAL";
-        confidence = 0;
-
-        reason =
-            "No sufficiently clear direction detected.";
-
-    }
-
-
-    return {
-        signal: signal,
-        confidence: confidence,
-        reason: reason,
-        lastCandle: lastCandle
-    };
-}
-
-
-// ------------------------------------------
-// Update Signal Display
-// ------------------------------------------
-
-function displaySignal(result) {
-
-    signalElement.className = "signal";
-
-    if (result.signal === "UP") {
-
-        signalElement.classList.add("up");
-
-        signalElement.textContent = "UP";
-
-        signalIcon.textContent = "⬆";
-
-    }
-    else if (result.signal === "DOWN") {
-
-        signalElement.classList.add("down");
-
-        signalElement.textContent = "DOWN";
-
-        signalIcon.textContent = "⬇";
-
-    }
-    else {
-
-        signalElement.classList.add("neutral");
-
-        signalElement.textContent =
-            "NO SIGNAL";
-
-        signalIcon.textContent = "—";
-    }
-
-
-    confidenceValue.textContent =
-        result.confidence > 0
-            ? result.confidence + "%"
-            : "—";
-
-
-    confidenceFill.style.width =
-        result.confidence + "%";
-
-
-    signalMessage.textContent =
-        result.reason;
-}
-
-
-// ------------------------------------------
-// Add Signal To History
-// ------------------------------------------
-
-function addToHistory(result, asset) {
-
-    if (result.signal === "NO SIGNAL") {
-        return;
-    }
-
-
-    const record = {
-
-        asset: asset,
-
-        signal: result.signal,
-
-        confidence: result.confidence,
-
-        time: new Date().toLocaleTimeString()
-
-    };
-
-
-    signalHistory.unshift(record);
-
-
-    // Keep last 20 signals only
-
-    if (signalHistory.length > 20) {
-
-        signalHistory =
-            signalHistory.slice(0, 20);
-    }
-
-
-    renderHistory();
-}
-
-
-// ------------------------------------------
-// Render History
-// ------------------------------------------
-
-function renderHistory() {
-
-    historyCount.textContent =
-        signalHistory.length;
-
-
-    if (signalHistory.length === 0) {
-
-        historyList.innerHTML = `
-            <p class="empty-history">
-                No signals recorded yet.
-            </p>
-        `;
-
-        return;
-    }
-
-
-    historyList.innerHTML =
-        signalHistory.map(record => {
-
-            const signalClass =
-                record.signal.toLowerCase();
-
-            return `
-                <div class="history-item">
-
-                    <div>
-                        <div class="history-asset">
-                            ${record.asset}
-                        </div>
-
-                        <div class="history-time">
-                            ${record.time}
-                        </div>
-                    </div>
-
-                    <div
-                        class="history-signal ${signalClass}"
-                    >
-                        ${record.signal}
-                        ${record.confidence}%
-                    </div>
-
-                </div>
-            `;
-
-        }).join("");
-}
-
-
-// ------------------------------------------
-// Scan Market
-// ------------------------------------------
-
-function scanMarket() {
-
-    scanButton.disabled = true;
-
-    scanButton.textContent =
-        "ANALYZING...";
-
-
-    signalElement.className =
-        "signal neutral";
-
-    signalElement.textContent =
-        "ANALYZING";
-
-    signalIcon.textContent =
-        "⟳";
-
-    signalMessage.textContent =
-        "Analyzing demo candle data...";
-
-
-    confidenceValue.textContent =
-        "—";
-
-    confidenceFill.style.width =
-        "0%";
-
-
-    // Simulate analysis time
-
-    setTimeout(() => {
-
-        const selectedAsset =
-            assetSelect.value;
-
-
-        const candles =
-            generateDemoCandles(30);
-
-
-        const result =
-            analyzeCandles(candles);
-
-
-        displaySignal(result);
-
-
-        addToHistory(
-            result,
-            selectedAsset
-        );
-
-
-        scanButton.disabled = false;
-
-        scanButton.textContent =
-            "SCAN MARKET";
-
-    }, 1200);
-}
-
-
-// ------------------------------------------
-// Scan Button Event
-// ------------------------------------------
-
-scanButton.addEventListener(
-    "click",
-    scanMarket
-);
-
-
-// ------------------------------------------
-// Asset Change
-// ------------------------------------------
-
-assetSelect.addEventListener(
-    "change",
-    () => {
-
-        signalElement.className =
-            "signal neutral";
-
-        signalElement.textContent =
-            "NO SIGNAL";
-
-        signalIcon.textContent =
-            "—";
-
-        signalMessage.textContent =
-            "Press SCAN to analyze the selected asset.";
-
-        confidenceValue.textContent =
-            "—";
-
-        confidenceFill.style.width =
-            "0%";
-    }
-);
-
-
-// ------------------------------------------
-// Initial State
-// ------------------------------------------
-
-renderHistory();
-
-console.log(
-    "Quotex AI Signal prototype loaded."
-);
+        confidence =
+            Math.floor(
