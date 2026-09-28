@@ -4,26 +4,25 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.util.DisplayMetrics
+import android.view.WindowManager
 
 class ScreenCaptureService : Service() {
 
     private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
+    private var virtualDisplay: android.hardware.display.VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
     companion object {
-
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
 
@@ -63,22 +62,20 @@ class ScreenCaptureService : Service() {
             return START_NOT_STICKY
         }
 
-        val resultCode =
-            intent.getIntExtra(
-                EXTRA_RESULT_CODE,
-                -1
-            )
+        val resultCode = intent.getIntExtra(
+            EXTRA_RESULT_CODE,
+            -1
+        )
 
-        val resultData =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(
-                    EXTRA_DATA,
-                    Intent::class.java
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra(EXTRA_DATA)
-            }
+        val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(
+                EXTRA_DATA,
+                Intent::class.java
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(EXTRA_DATA)
+        }
 
         if (resultCode == -1 || resultData == null) {
             stopSelf()
@@ -97,14 +94,13 @@ class ScreenCaptureService : Service() {
         resultCode: Int,
         resultData: Intent
     ) {
-
         if (mediaProjection != null) {
             return
         }
 
         val mediaProjectionManager =
             getSystemService(
-                MEDIA_PROJECTION_SERVICE
+                Context.MEDIA_PROJECTION_SERVICE
             ) as MediaProjectionManager
 
         mediaProjection =
@@ -121,42 +117,36 @@ class ScreenCaptureService : Service() {
         val metrics = DisplayMetrics()
 
         @Suppress("DEPRECATION")
+        val windowManager =
+            getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+        @Suppress("DEPRECATION")
         windowManager.defaultDisplay.getRealMetrics(metrics)
 
         val width = metrics.widthPixels
         val height = metrics.heightPixels
         val density = metrics.densityDpi
 
-        imageReader =
-            ImageReader.newInstance(
-                width,
-                height,
-                PixelFormat.RGBA_8888,
-                2
-            )
+        imageReader = ImageReader.newInstance(
+            width,
+            height,
+            PixelFormat.RGBA_8888,
+            2
+        )
 
         imageReader?.setOnImageAvailableListener(
             { reader ->
-
-                val image =
-                    reader.acquireLatestImage()
+                val image = reader.acquireLatestImage()
 
                 if (image != null) {
-
                     try {
-
-                        /*
-                         * Screen frame received here.
-                         *
-                         * This is where the future chart-analysis
-                         * engine will process the captured screen.
-                         */
-
+                        // Screen frame received.
+                        // Chart-analysis engine will process
+                        // captured frames here.
                     } finally {
                         image.close()
                     }
                 }
-
             },
             null
         )
@@ -167,7 +157,7 @@ class ScreenCaptureService : Service() {
                 width,
                 height,
                 density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader?.surface,
                 null,
                 null
@@ -179,15 +169,13 @@ class ScreenCaptureService : Service() {
     }
 
     private fun createNotificationChannel() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
-            val channel =
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Screen Capture",
-                    NotificationManager.IMPORTANCE_LOW
-                )
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Screen Capture",
+                NotificationManager.IMPORTANCE_LOW
+            )
 
             channel.description =
                 "Screen capture service for Quotex AI Signal"
@@ -197,9 +185,7 @@ class ScreenCaptureService : Service() {
                     NotificationManager::class.java
                 )
 
-            manager.createNotificationChannel(
-                channel
-            )
+            manager.createNotificationChannel(channel)
         }
     }
 
@@ -213,9 +199,7 @@ class ScreenCaptureService : Service() {
             )
                 .setContentTitle("Quotex AI Signal")
                 .setContentText("Screen capture is running")
-                .setSmallIcon(
-                    android.R.drawable.ic_menu_view
-                )
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build()
 
@@ -225,9 +209,7 @@ class ScreenCaptureService : Service() {
             Notification.Builder(this)
                 .setContentTitle("Quotex AI Signal")
                 .setContentText("Screen capture is running")
-                .setSmallIcon(
-                    android.R.drawable.ic_menu_view
-                )
+                .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build()
         }
